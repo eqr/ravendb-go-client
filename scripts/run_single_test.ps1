@@ -31,7 +31,7 @@ if ($enableCluster) {
 
 go clean -testcache
 
-#go test -tags for_tests -v -timeout 30s "-coverpkg=github.com/ravendb/ravendb-go-client" -covermode=atomic "-coverprofile=coverage.txt"  ./tests -run ^TestCachingOfDocumentInclude$
+#go test -tags for_tests -v -timeout 30s "-coverpkg=github.com/eqr/ravendb-go-client" -covermode=atomic "-coverprofile=coverage.txt"  ./tests -run ^TestCachingOfDocumentInclude$
 
 go test -tags for_tests -v -race -timeout 60s ./tests -run ^TestNonNilTimeError$
 

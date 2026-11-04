@@ -8,7 +8,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/hashicorp/go-multierror"
-	"github.com/ravendb/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client"
 	"github.com/stretchr/testify/assert"
 	"io"
 	"io/ioutil"

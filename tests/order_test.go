@@ -1,7 +1,7 @@
 package tests
 
 import (
-	ravendb "github.com/ravendb/ravendb-go-client"
+	ravendb "github.com/eqr/ravendb-go-client"
 )
 
 type Order struct {

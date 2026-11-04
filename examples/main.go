@@ -11,10 +11,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ravendb/ravendb-go-client/examples/northwind"
+	"github.com/eqr/ravendb-go-client/examples/northwind"
 
 	"github.com/kylelemons/godebug/pretty"
-	ravendb "github.com/ravendb/ravendb-go-client"
+	ravendb "github.com/eqr/ravendb-go-client"
 )
 
 // "Demo" is a Northwind sample database

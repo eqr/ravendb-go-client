@@ -1,6 +1,6 @@
 package northwind
 
-import "github.com/ravendb/ravendb-go-client"
+import "github.com/eqr/ravendb-go-client"
 
 // definitions for Northwind test database as hosted at https://live-test.ravendb.net
 // in database "Demo"

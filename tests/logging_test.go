@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	ravendb "github.com/ravendb/ravendb-go-client"
+	ravendb "github.com/eqr/ravendb-go-client"
 )
 
 var (

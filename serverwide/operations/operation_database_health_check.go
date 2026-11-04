@@ -1,7 +1,7 @@
 package operations
 
 import (
-	"github.com/ravendb/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client"
 	"net/http"
 )
 

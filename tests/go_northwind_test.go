@@ -1,8 +1,8 @@
 package tests
 
 import (
-	"github.com/ravendb/ravendb-go-client"
-	"github.com/ravendb/ravendb-go-client/examples/northwind"
+	"github.com/eqr/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client/examples/northwind"
 	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"

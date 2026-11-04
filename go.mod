@@ -1,4 +1,4 @@
-module github.com/ravendb/ravendb-go-client
+module github.com/eqr/ravendb-go-client
 
 go 1.16
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	ravendb "github.com/ravendb/ravendb-go-client"
+	ravendb "github.com/eqr/ravendb-go-client"
 )
 
 func ravendb6292_ifIncludedDocumentIsConflictedItShouldNotThrowConflictException(t *testing.T, driver *RavenTestDriver) {

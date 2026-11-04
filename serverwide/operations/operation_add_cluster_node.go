@@ -3,7 +3,7 @@ package operations
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ravendb/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client"
 	"net/http"
 	"net/url"
 	"strconv"

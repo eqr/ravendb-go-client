@@ -27,4 +27,4 @@ echo "GOPATH:           ${GOPATH}"
 # compile examples to catch mistakes there
 go test -v -c ./examples
 
-go test -tags for_tests -v -race -parallel 1 -timeout 30m -coverpkg=github.com/ravendb/ravendb-go-client -covermode=atomic -coverprofile=coverage.txt . ./tests
+go test -tags for_tests -v -race -parallel 1 -timeout 30m -coverpkg=github.com/eqr/ravendb-go-client -covermode=atomic -coverprofile=coverage.txt . ./tests

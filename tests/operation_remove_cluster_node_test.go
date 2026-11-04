@@ -1,7 +1,7 @@
 package tests
 
 import (
-	"github.com/ravendb/ravendb-go-client/serverwide/operations"
+	"github.com/eqr/ravendb-go-client/serverwide/operations"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"

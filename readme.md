@@ -1,14 +1,16 @@
-[![compile](https://github.com/ravendb/ravendb-go-client/actions/workflows/RavenClient.yml/badge.svg)](https://github.com/ravendb/ravendb-go-client/actions/workflows/RavenClient.yml)
+[![compile](https://github.com/eqr/ravendb-go-client/actions/workflows/RavenClient.yml/badge.svg)](https://github.com/eqr/ravendb-go-client/actions/workflows/RavenClient.yml)
 
 This is information on how to use the library. For docs on working on the library itself see [readme-dev.md](readme-dev.md).
 
+Fork provenance and maintenance policy: [FORK.md](FORK.md).
+
 This library requires go 1.11 or later.
 
-API reference: https://godoc.org/github.com/ravendb/ravendb-go-client
+API reference: https://pkg.go.dev/github.com/eqr/ravendb-go-client
 
 This library is in beta state. All the basic functionality works and passes extensive [test suite](/tests), but the API for more esoteric features might change.
 
-If you encounter bugs, have suggestions or feature requests, please [open an issue](https://github.com/ravendb/ravendb-go-client/issues).
+If you encounter fork-specific bugs, suggestions, or feature requests, please [open an issue](https://github.com/eqr/ravendb-go-client/issues).
 
 ## Documentation
 
@@ -25,7 +27,7 @@ To run a a specific example, e.g. `crudStore`, you can run:
 1. Import the package
 ```go
 import (
-	ravendb "github.com/ravendb/ravendb-go-client"
+	ravendb "github.com/eqr/ravendb-go-client"
 )
 ```
 
@@ -311,7 +313,7 @@ err = q.First(&first)
 ```
 See `queryFirst()` in [examples/main.go](examples/main.go) for full example.
 
-## Overview of [DocumentQuery](https://godoc.org/github.com/ravendb/ravendb-go-client#DocumentQuery) methods
+## Overview of [DocumentQuery](https://pkg.go.dev/github.com/eqr/ravendb-go-client#DocumentQuery) methods
 
 ### SelectFields() - projections using a single field
 

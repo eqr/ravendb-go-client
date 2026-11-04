@@ -1,4 +1,4 @@
-[![Linux build Status](https://travis-ci.org/ravendb/ravendb-go-client.svg?branch=master)](https://travis-ci.org/ravendb/ravendb-go-client) [![Windows build status](https://ci.appveyor.com/api/projects/status/rf326yoxl1uf444h/branch/master?svg=true)](https://ci.appveyor.com/project/ravendb/ravendb-go-client/branch/master)
+[![build](https://github.com/eqr/ravendb-go-client/actions/workflows/RavenClient.yml/badge.svg)](https://github.com/eqr/ravendb-go-client/actions/workflows/RavenClient.yml)
 
 # How to install and run
 
@@ -7,7 +7,7 @@ This is information for working on the library itself. For docs on how to use th
 You need go 1.11 or later. Earlier versions have bugs that affect us (https://github.com/golang/go/issues/18468, https://github.com/golang/go/issues/26390) and don't support modules.
 
 ```
-git clone https://github.com/ravendb/ravendb-go-client.git
+git clone https://github.com/eqr/ravendb-go-client.git
 cd ravendb-go-client
 ```
 

@@ -24,7 +24,7 @@ export RAVENDB_TEST_HTTPS_SERVER_URL="https://a.javatest11.development.run:8085"
 echo "pwd:              ${wd}"
 echo "GOPATH:           ${GOPATH}"
 
-go test -tags for_tests -v -race -parallel 1 -timeout 30m -coverpkg=github.com/ravendb/ravendb-go-client -covermode=atomic -coverprofile=coverage.txt . ./tests
+go test -tags for_tests -v -race -parallel 1 -timeout 30m -coverpkg=github.com/eqr/ravendb-go-client -covermode=atomic -coverprofile=coverage.txt . ./tests
 exitCode=$?
 
 # Note: this doesn't seem to send code coverage so we do it from travis instead

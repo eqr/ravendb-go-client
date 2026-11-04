@@ -1,6 +1,6 @@
 @rem default test -timeout is 10m which sometimes is not enough
 
-go test -tags for_tests -v -parallel 1 -timeout 20m "-coverpkg=github.com/ravendb/ravendb-go-client" -covermode=atomic "-coverprofile=coverage.txt" . ./tests
+go test -tags for_tests -v -parallel 1 -timeout 20m "-coverpkg=github.com/eqr/ravendb-go-client" -covermode=atomic "-coverprofile=coverage.txt" . ./tests
 
 set testerrorlevel=%errorlevel%
 

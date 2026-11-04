@@ -2,7 +2,7 @@ package operations
 
 import (
 	"encoding/json"
-	"github.com/ravendb/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client"
 	"net/http"
 )
 

@@ -2,7 +2,7 @@ package tests
 
 import (
 	"fmt"
-	"github.com/ravendb/ravendb-go-client/serverwide/certificates"
+	"github.com/eqr/ravendb-go-client/serverwide/certificates"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"

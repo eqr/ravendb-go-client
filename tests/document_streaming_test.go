@@ -4,7 +4,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/ravendb/ravendb-go-client"
+	"github.com/eqr/ravendb-go-client"
 	"github.com/stretchr/testify/assert"
 )
 
