@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+// RavenDB enables automatic atomic writes only for clients advertising version 5.2 or later.
+const clusterTransactionAtomicGuardClientVersion = "5.2.0"
+
 var (
 	_ RavenCommand = &BatchCommand{}
 )
@@ -77,6 +80,11 @@ func newBatchCommand(conventions *DocumentConventions, commands []ICommandData, 
 	}
 
 	return cmd, nil
+}
+
+func (c *BatchCommand) requiresAutomaticAtomicDocumentWrites() bool {
+	return c.transactionMode == TransactionMode_ClusterWide &&
+		(c.disableAtomicDocumentWrites == nil || !*c.disableAtomicDocumentWrites)
 }
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")

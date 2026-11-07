@@ -1116,7 +1116,11 @@ func (re *RequestExecutor) createRequest(sessionInfo *SessionInfo, node *ServerN
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set(headersClientVersion, goClientVersion)
+	clientVersion := goClientVersion
+	if batchCommand, ok := command.(*BatchCommand); ok && batchCommand.requiresAutomaticAtomicDocumentWrites() {
+		clientVersion = clusterTransactionAtomicGuardClientVersion
+	}
+	request.Header.Set(headersClientVersion, clientVersion)
 	if sessionInfo != nil && sessionInfo.lastClusterTransactionIndex != nil {
 		request.Header.Set(lastKnownClusterTransactionIndex, strconv.FormatInt(*sessionInfo.lastClusterTransactionIndex, 10))
 	}

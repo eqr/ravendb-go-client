@@ -34,7 +34,12 @@ func (o *LoadOperation) createRequest() (*GetDocumentsCommand, error) {
 		return nil, err
 	}
 
-	return NewGetDocumentsCommand(o.idsToCheckOnServer, o.includes, false)
+	command, err := NewGetDocumentsCommand(o.idsToCheckOnServer, o.includes, false)
+	if err != nil {
+		return nil, err
+	}
+	command.setTransactionMode(o.session.transactionMode)
+	return command, nil
 }
 
 func (o *LoadOperation) byID(id string) *LoadOperation {
@@ -146,9 +151,19 @@ func (o *LoadOperation) getDocuments(results interface{}) error {
 	return nil
 }
 
-func (o *LoadOperation) setResult(result *GetDocumentsResult) {
+func (o *LoadOperation) setResult(result *GetDocumentsResult) error {
 	if result == nil {
-		return
+		return nil
+	}
+
+	if o.session.transactionMode == TransactionMode_ClusterWide && result.CompareExchangeValueIncludes != nil {
+		clusterSession, err := o.session.GetClusterSession()
+		if err != nil {
+			return err
+		}
+		if err := clusterSession.registerAutomaticGuardIncludes(result.CompareExchangeValueIncludes); err != nil {
+			return err
+		}
 	}
 
 	o.session.registerIncludes(result.Includes)
@@ -164,4 +179,5 @@ func (o *LoadOperation) setResult(result *GetDocumentsResult) {
 	}
 
 	o.session.registerMissingIncludes(result.Results, result.Includes, o.includes)
+	return nil
 }

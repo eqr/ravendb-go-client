@@ -17,7 +17,8 @@ type GetDocumentsCommand struct {
 	_ids      []string
 	_includes []string
 
-	_metadataOnly bool
+	_metadataOnly   bool
+	transactionMode int
 
 	_startWith  string
 	_matches    string
@@ -52,6 +53,10 @@ func NewGetDocumentsCommand(ids []string, includes []string, metadataOnly bool) 
 	return cmd, nil
 }
 
+func (c *GetDocumentsCommand) setTransactionMode(transactionMode int) {
+	c.transactionMode = transactionMode
+}
+
 func NewGetDocumentsCommandFull(startWith string, startAfter string, matches string, exclude string, start int, pageSize int, metadataOnly bool) (*GetDocumentsCommand, error) {
 	if startWith == "" {
 		return nil, newIllegalArgumentError("startWith cannot be null")
@@ -71,6 +76,9 @@ func NewGetDocumentsCommandFull(startWith string, startAfter string, matches str
 
 func (c *GetDocumentsCommand) CreateRequest(node *ServerNode) (*http.Request, error) {
 	url := node.URL + "/databases/" + node.Database + "/docs?"
+	if c.transactionMode == TransactionMode_ClusterWide {
+		url += "&txMode=ClusterWide"
+	}
 	if c._start > 0 {
 		url += "&start=" + strconv.Itoa(c._start)
 	}

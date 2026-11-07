@@ -36,12 +36,18 @@ func (b *BatchOperation) createRequest() (*BatchCommand, error) {
 
 func (b *BatchOperation) setResult(serverResult *JSONArrayResult) error {
 	b.session.sessionInfo.lastClusterTransactionIndex = &serverResult.TransactionIndex
-	if b.session.transactionMode == TransactionMode_ClusterWide && serverResult.TransactionIndex <= 0 {
-		url, err := b.session.GetRequestExecutor().GetURL()
-		if err != nil {
-			url = "UNKOWN_URL"
+	if b.session.transactionMode == TransactionMode_ClusterWide {
+		if serverResult.TransactionIndex <= 0 {
+			url, err := b.session.GetRequestExecutor().GetURL()
+			if err != nil {
+				url = "UNKOWN_URL"
+			}
+			return newIllegalStateError("Cluster transaction was send to a node that is not supporting it.  So it was executed ONLY on the requested node on " + url)
 		}
-		return newIllegalStateError("Cluster transaction was send to a node that is not supporting it.  So it was executed ONLY on the requested node on " + url)
+		b.session.documentStore.updateLastClusterTransactionIndex(
+			b.session.DatabaseName,
+			serverResult.TransactionIndex,
+		)
 	}
 
 	result := serverResult.Results

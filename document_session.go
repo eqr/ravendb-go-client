@@ -400,7 +400,9 @@ func (s *DocumentSession) LoadContext(ctx context.Context, result interface{}, i
 		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return err
 		}
-		loadOperation.setResult(command.Result)
+		if err := loadOperation.setResult(command.Result); err != nil {
+			return err
+		}
 	}
 	return loadOperation.getDocument(result)
 }
@@ -477,7 +479,9 @@ func (s *DocumentSession) loadInternalWithOperationContext(ctx context.Context, 
 			err = enc.Encode(result)
 			panicIf(err != nil, "enc.Encode() failed with %s", err)
 		} else {
-			operation.setResult(command.Result)
+			if err := operation.setResult(command.Result); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -505,7 +509,9 @@ func (s *DocumentSession) loadInternalMultiContext(ctx context.Context, results 
 		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return err
 		}
-		loadOperation.setResult(command.Result)
+		if err := loadOperation.setResult(command.Result); err != nil {
+			return err
+		}
 	}
 	return loadOperation.getDocuments(results)
 }

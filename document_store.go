@@ -45,6 +45,9 @@ type DocumentStore struct {
 	// so must protect access with mutex and use case-insensitive lookup
 	requestsExecutors map[string]*RequestExecutor
 
+	// Last cluster transaction index per database, used to seed newly opened sessions.
+	lastClusterTransactionIndexes map[string]int64
+
 	multiDbHiLo                  *MultiDatabaseHiLoIDGenerator
 	maintenanceOperationExecutor *MaintenanceOperationExecutor
 	operationExecutor            *OperationExecutor
@@ -210,6 +213,32 @@ func (s *DocumentStore) assertNotInitialized(property string) {
 
 func (s *DocumentStore) GetDatabase() string {
 	return s.database
+}
+
+func (s *DocumentStore) getLastClusterTransactionIndex(database string) *int64 {
+	key := strings.ToLower(database)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index, ok := s.lastClusterTransactionIndexes[key]
+	if !ok || index <= 0 {
+		return nil
+	}
+	return &index
+}
+
+func (s *DocumentStore) updateLastClusterTransactionIndex(database string, index int64) {
+	if database == "" || index <= 0 {
+		return
+	}
+	key := strings.ToLower(database)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastClusterTransactionIndexes == nil {
+		s.lastClusterTransactionIndexes = make(map[string]int64)
+	}
+	if index > s.lastClusterTransactionIndexes[key] {
+		s.lastClusterTransactionIndexes[key] = index
+	}
 }
 
 func (s *DocumentStore) SetDatabase(database string) {

@@ -3,11 +3,49 @@ package ravendb
 import (
 	"context"
 	"reflect"
+	"strings"
 )
 
+const automaticClusterTransactionGuardKeyPrefix = "rvn-atomic/"
+
 type ClusterTransactionOperations struct {
-	session *InMemoryDocumentSessionOperations
-	state   map[string]*CompareExchangeSessionValue
+	session                                   *InMemoryDocumentSessionOperations
+	state                                     map[string]*CompareExchangeSessionValue
+	missingDocumentsToAtomicGuardChangeVector map[string]string
+}
+
+func (cto *ClusterTransactionOperations) registerAutomaticGuardIncludes(includes map[string]interface{}) error {
+	if cto.session.noTracking {
+		return nil
+	}
+	for includeKey, raw := range includes {
+		value, ok := raw.(map[string]interface{})
+		if !ok {
+			return newIllegalStateError("CompareExchangeValueIncludes contains an invalid value for " + includeKey)
+		}
+		key := includeKey
+		if responseKey, ok := value["Key"].(string); ok && responseKey != "" {
+			key = responseKey
+		}
+		if !strings.HasPrefix(strings.ToLower(key), automaticClusterTransactionGuardKeyPrefix) {
+			continue
+		}
+		changeVector, ok := value["ChangeVector"].(string)
+		if !ok || changeVector == "" {
+			continue
+		}
+		if cto.missingDocumentsToAtomicGuardChangeVector == nil {
+			cto.missingDocumentsToAtomicGuardChangeVector = make(map[string]string)
+		}
+		documentID := key[len(automaticClusterTransactionGuardKeyPrefix):]
+		cto.missingDocumentsToAtomicGuardChangeVector[strings.ToLower(documentID)] = changeVector
+	}
+	return nil
+}
+
+func (cto *ClusterTransactionOperations) missingAtomicGuardChangeVector(documentID string) (string, bool) {
+	changeVector, ok := cto.missingDocumentsToAtomicGuardChangeVector[strings.ToLower(documentID)]
+	return changeVector, ok
 }
 
 func (cto *ClusterTransactionOperations) GetNumberOfTrackedCompareExchangeValues() int {
@@ -41,6 +79,7 @@ func (cto *ClusterTransactionOperations) updateState(key string, index int64) (*
 
 func (cto *ClusterTransactionOperations) Clear() {
 	cto.state = make(map[string]*CompareExchangeSessionValue)
+	cto.missingDocumentsToAtomicGuardChangeVector = nil
 }
 
 func (cto *ClusterTransactionOperations) CreateCompareExchangeValue(key string, item interface{}) (interface{}, error) {

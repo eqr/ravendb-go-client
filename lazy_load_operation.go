@@ -134,7 +134,5 @@ func (o *LazyLoadOperation) handleResponse(response *GetResponse) error {
 }
 
 func (o *LazyLoadOperation) handleResponse2(loadResult *GetDocumentsResult) error {
-	o._loadOperation.setResult(loadResult)
-	// Note: rest delayed to getResult()
-	return nil
+	return o._loadOperation.setResult(loadResult)
 }

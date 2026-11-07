@@ -96,12 +96,15 @@ type InMemoryDocumentSessionOperations struct {
 func newInMemoryDocumentSessionOperations(dbName string, store *DocumentStore, re *RequestExecutor, id string, transactionMode int, disableAtomicDocumentWritesInClusterWideTransaction *bool) *InMemoryDocumentSessionOperations {
 	clientSessionID := newClientSessionID()
 	res := &InMemoryDocumentSessionOperations{
-		id:                            id,
-		clientSessionID:               clientSessionID,
-		deletedEntities:               newObjectSet(),
-		requestExecutor:               re,
-		generateDocumentKeysOnStore:   true,
-		sessionInfo:                   &SessionInfo{SessionID: clientSessionID},
+		id:                          id,
+		clientSessionID:             clientSessionID,
+		deletedEntities:             newObjectSet(),
+		requestExecutor:             re,
+		generateDocumentKeysOnStore: true,
+		sessionInfo: &SessionInfo{
+			SessionID:                   clientSessionID,
+			lastClusterTransactionIndex: store.getLastClusterTransactionIndex(dbName),
+		},
 		documentsByID:                 newDocumentsByID(),
 		includedDocumentsByID:         map[string]*documentInfo{},
 		documentsByEntity:             []*documentInfo{},
@@ -534,8 +537,10 @@ func (s *InMemoryDocumentSessionOperations) DeleteByID(id string, expectedChange
 	}
 
 	var changeVector string
+	var originalChangeVector *string
 	documentInfo := s.documentsByID.getValue(id)
 	if documentInfo != nil {
+		originalChangeVector = documentInfo.changeVector
 		newObj := convertEntityToJSON(documentInfo.entity, documentInfo)
 		if documentInfo.entity != nil && s.entityChanged(newObj, documentInfo, nil) {
 			return newIllegalStateError("Can't delete changed entity using identifier. Use delete(Class clazz, T entity) instead.")
@@ -555,7 +560,10 @@ func (s *InMemoryDocumentSessionOperations) DeleteByID(id string, expectedChange
 	if !s.useOptimisticConcurrency {
 		changeVector = ""
 	}
-	cmdData := NewDeleteCommandData(id, firstNonEmptyString(expectedChangeVector, changeVector))
+	if expectedChangeVector != "" {
+		originalChangeVector = &expectedChangeVector
+	}
+	cmdData := newDeleteCommandData(id, firstNonEmptyString(expectedChangeVector, changeVector), originalChangeVector)
 	s.Defer(cmdData)
 	return nil
 }
@@ -737,6 +745,11 @@ func (s *InMemoryDocumentSessionOperations) storeEntityInUnitOfWork(id string, e
 	if id != "" {
 		s.knownMissingIds = stringArrayRemoveNoCase(s.knownMissingIds, id)
 	}
+	if changeVector == nil && s.transactionMode == TransactionMode_ClusterWide && s.clusterTransactions != nil {
+		if guardChangeVector, ok := s.clusterTransactions.missingAtomicGuardChangeVector(id); ok {
+			changeVector = &guardChangeVector
+		}
+	}
 	documentInfo := &documentInfo{}
 	documentInfo.id = id
 	documentInfo.metadata = metadata
@@ -873,11 +886,13 @@ func (s *InMemoryDocumentSessionOperations) prepareForEntitiesDeletion(result *s
 				}
 			}
 
+			originalChangeVector := documentInfo.changeVector
 			var changeVector *string
 			documentInfo = s.documentsByID.getValue(documentInfo.id)
 
 			if documentInfo != nil {
 				changeVector = documentInfo.changeVector
+				originalChangeVector = documentInfo.changeVector
 
 				if documentInfo.entity != nil {
 					deleteDocumentInfoByEntity(&s.documentsByEntity, documentInfo.entity)
@@ -898,7 +913,7 @@ func (s *InMemoryDocumentSessionOperations) prepareForEntitiesDeletion(result *s
 				}
 			}
 
-			cmdData := NewDeleteCommandData(documentInfo.id, stringPtrToString(changeVector))
+			cmdData := newDeleteCommandData(documentInfo.id, stringPtrToString(changeVector), originalChangeVector)
 			result.addSessionCommandData(cmdData)
 		}
 
@@ -971,7 +986,7 @@ func (s *InMemoryDocumentSessionOperations) prepareForEntitiesPuts(result *saveC
 		} else {
 			changeVector = nil // TODO: redundant
 		}
-		cmdData := newPutCommandDataWithJSON(entityValue.id, changeVector, document)
+		cmdData := newPutCommandDataWithJSON(entityValue.id, changeVector, entityValue.changeVector, document)
 		result.addSessionCommandData(cmdData)
 	}
 	return nil
