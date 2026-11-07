@@ -76,7 +76,11 @@ func (h *HashCalculator) write(v interface{}) {
 			io.WriteString(&h._buffer, k)
 			if v == nil {
 				io.WriteString(&h._buffer, "null")
-				return
+				continue
+			}
+			if timestamp, ok := v.(time.Time); ok {
+				h.write(timestamp)
+				continue
 			}
 			tp := reflect.TypeOf(v)
 			if _, ok := isPtrStruct(tp); ok || tp.Kind() == reflect.Struct {
@@ -85,7 +89,7 @@ func (h *HashCalculator) write(v interface{}) {
 				// param that is custom type used by the user
 				s := fmt.Sprintf("%#v", v)
 				io.WriteString(&h._buffer, s)
-				return
+				continue
 			}
 			h.write(v)
 		}
@@ -96,8 +100,7 @@ func (h *HashCalculator) write(v interface{}) {
 		}
 		must(binary.Write(&h._buffer, binary.LittleEndian, toWrite))
 	case time.Time:
-		t := v2.UTC().Unix()
-		must(binary.Write(&h._buffer, binary.LittleEndian, t))
+		io.WriteString(&h._buffer, v2.UTC().Format(time.RFC3339Nano))
 	case int:
 		must(binary.Write(&h._buffer, binary.LittleEndian, int64(v2)))
 	default:
