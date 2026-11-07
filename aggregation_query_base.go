@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"reflect"
 	"time"
 )
@@ -30,6 +31,13 @@ func newAggregationDocumentQuery(source *DocumentQuery) *AggregationDocumentQuer
 }
 
 func (q *aggregationQueryBase) Execute() (map[string]*FacetResult, error) {
+	return q.ExecuteContext(context.Background())
+}
+
+func (q *aggregationQueryBase) ExecuteContext(ctx context.Context) (map[string]*FacetResult, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	if q.err != nil {
 		return nil, q.err
 	}
@@ -37,13 +45,11 @@ func (q *aggregationQueryBase) Execute() (map[string]*FacetResult, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	q.startTime = time.Now()
-
 	if err = q.session.incrementRequestCount(); err != nil {
 		return nil, err
 	}
-	if err = q.session.GetRequestExecutor().ExecuteCommand(command, nil); err != nil {
+	if err = q.session.GetRequestExecutor().ExecuteCommandContext(ctx, command, nil); err != nil {
 		return nil, err
 	}
 	return q.processResults(command.Result, q.session.GetConventions())
@@ -65,7 +71,6 @@ func (q *aggregationQueryBase) ExecuteLazy() (*Lazy, error) {
 	afterFn := func(result *QueryResult) {
 		q.invokeAfterQueryExecuted(result)
 	}
-
 
 	processResultFn := func(queryResult *QueryResult, conventions *DocumentConventions) (map[string]*FacetResult, error) {
 		results := map[string]*FacetResult{}

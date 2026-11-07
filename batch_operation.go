@@ -94,12 +94,12 @@ func (b *BatchOperation) setResult(serverResult *JSONArrayResult) error {
 			b.session.onAfterSaveChangesInvoke(afterSaveChangesEventArgs)
 			break
 		case "CompareExchangePUT":
-			index, exist := batchResult["Index"].(float64)
-			if exist == false {
+			index, exist := jsonGetAsInt64(batchResult, "Index")
+			if !exist {
 				return newIllegalStateError("CompareExchangePUT is missing index property.")
 			}
 			key, exist := batchResult["Key"].(string)
-			if exist == false {
+			if !exist {
 				return newIllegalStateError("CompareExchangePUT is missing key property.")
 			}
 			clusterSession, err := b.session.GetClusterSession()
@@ -107,8 +107,7 @@ func (b *BatchOperation) setResult(serverResult *JSONArrayResult) error {
 				return err
 			}
 
-			clusterSession.updateState(key, int64(index))
-			break
+			clusterSession.updateState(key, index)
 		default:
 			break
 		}

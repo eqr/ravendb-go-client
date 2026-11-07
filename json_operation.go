@@ -26,15 +26,32 @@ func jsonOperationEntityChanged(newObj map[string]interface{}, documentInfo *doc
 	return true
 }
 
-func isJSONFloatEqual(oldPropVal float64, newProp interface{}) bool {
-	switch newPropVal := newProp.(type) {
-	case nil:
+func jsonNumbersEqual(left, right interface{}) bool {
+	leftUnsigned, leftIsUnsigned := left.(uint64)
+	rightUnsigned, rightIsUnsigned := right.(uint64)
+	if leftIsUnsigned && leftUnsigned > uint64(maxInt64Value) {
+		return rightIsUnsigned && leftUnsigned == rightUnsigned
+	}
+	if rightIsUnsigned && rightUnsigned > uint64(maxInt64Value) {
 		return false
-	case float64:
-		return oldPropVal == newPropVal
-	default:
-		// TODO: can those happen in real life?
-		panicIf(true, "unhandled type of newProp, expected 'float64' and is '%T'", newProp)
+	}
+	leftInteger, leftIsInteger := jsonValueAsInt64(left)
+	rightInteger, rightIsInteger := jsonValueAsInt64(right)
+	if leftIsInteger && rightIsInteger {
+		return leftInteger == rightInteger
+	}
+	leftFloat, leftIsFloat := left.(float64)
+	rightFloat, rightIsFloat := right.(float64)
+	if leftIsFloat && rightIsFloat {
+		return leftFloat == rightFloat
+	}
+	if leftIsFloat && rightIsInteger {
+		integer, ok := float64ToInt64(leftFloat)
+		return ok && integer == rightInteger
+	}
+	if rightIsFloat && leftIsInteger {
+		integer, ok := float64ToInt64(rightFloat)
+		return ok && integer == leftInteger
 	}
 	return false
 }
@@ -98,7 +115,15 @@ func jsonOperationCompareJson(id string, originalJson map[string]interface{}, ne
 		oldProp := originalJson[prop]
 		switch newPropVal := newProp.(type) {
 		case float64:
-			if isJSONFloatEqual(newPropVal, oldProp) {
+			if jsonNumbersEqual(newPropVal, oldProp) {
+				break
+			}
+			if changes == nil {
+				return true
+			}
+			jsonOperationNewChange(prop, newProp, oldProp, docChanges, DocumentChangeFieldChanged)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			if jsonNumbersEqual(newPropVal, oldProp) {
 				break
 			}
 			if changes == nil {
@@ -117,7 +142,6 @@ func jsonOperationCompareJson(id string, originalJson map[string]interface{}, ne
 			if isJSONBoolEqual(newPropVal, oldProp) {
 				break
 			}
-
 			if changes == nil {
 				return true
 			}
@@ -127,19 +151,15 @@ func jsonOperationCompareJson(id string, originalJson map[string]interface{}, ne
 				if changes == nil {
 					return true
 				}
-
 				jsonOperationNewChange(prop, newProp, oldProp, docChanges, DocumentChangeFieldChanged)
 				break
 			}
-
-			changed := jsonOperationCompareJsonArray(id, oldProp.([]interface{}), newProp.([]interface{}), changes, docChanges, prop)
+			changed := jsonOperationCompareJsonArray(id, oldProp.([]interface{}), newPropVal, changes, docChanges, prop)
 			if changes == nil && changed {
 				return true
 			}
-
 		case map[string]interface{}:
 			oldPropVal, ok := oldProp.(map[string]interface{})
-			// TODO: a better check for nil?
 			if !ok || oldProp == nil {
 				if changes == nil {
 					return true
@@ -162,8 +182,6 @@ func jsonOperationCompareJson(id string, originalJson map[string]interface{}, ne
 				jsonOperationNewChange(prop, nil, oldProp, docChanges, DocumentChangeFieldChanged)
 				break
 			}
-			// TODO: array, nil
-			// Write tests for all types
 			panicIf(true, "unhandled type %T, newProp: '%v', oldProp: '%v'", newProp, newProp, oldProp)
 		}
 	}

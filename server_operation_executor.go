@@ -1,5 +1,7 @@
 package ravendb
 
+import "context"
+
 type ServerOperationExecutor struct {
 	requestExecutor *ClusterRequestExecutor
 }
@@ -23,20 +25,34 @@ func NewServerOperationExecutor(store *DocumentStore) *ServerOperationExecutor {
 }
 
 func (e *ServerOperationExecutor) Send(operation IServerOperation) error {
+	return e.SendContext(context.Background(), operation)
+}
+
+func (e *ServerOperationExecutor) SendContext(ctx context.Context, operation IServerOperation) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	command, err := operation.GetCommand(e.requestExecutor.GetConventions())
 	if err != nil {
 		return err
 	}
-	return e.requestExecutor.ExecuteCommand(command, nil)
+	return e.requestExecutor.ExecuteCommandContext(ctx, command, nil)
 }
 
 func (e *ServerOperationExecutor) SendAsync(operation IServerOperation) (*Operation, error) {
+	return e.SendAsyncContext(context.Background(), operation)
+}
+
+func (e *ServerOperationExecutor) SendAsyncContext(ctx context.Context, operation IServerOperation) (*Operation, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	requestExecutor := e.requestExecutor
 	command, err := operation.GetCommand(requestExecutor.GetConventions())
 	if err != nil {
 		return nil, err
 	}
-	if err = requestExecutor.ExecuteCommand(command, nil); err != nil {
+	if err = requestExecutor.ExecuteCommandContext(ctx, command, nil); err != nil {
 		return nil, err
 	}
 	result := getCommandOperationIDResult(command)

@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"time"
 )
 
@@ -28,10 +29,9 @@ func NewOperation(requestExecutor *RequestExecutor, changes func() *DatabaseChan
 	}
 }
 
-func (o *Operation) fetchOperationsStatus() (map[string]interface{}, error) {
+func (o *Operation) fetchOperationsStatusContext(ctx context.Context) (map[string]interface{}, error) {
 	command := o.getOperationStateCommand(o.conventions, o.id)
-	err := o.requestExecutor.ExecuteCommand(command, nil)
-	if err != nil {
+	if err := o.requestExecutor.ExecuteCommandContext(ctx, command, nil); err != nil {
 		return nil, err
 	}
 
@@ -53,8 +53,15 @@ func (o *Operation) getOperationStateCommand(conventions *DocumentConventions, i
 }
 
 func (o *Operation) WaitForCompletion() error {
+	return o.WaitForCompletionContext(context.Background())
+}
+
+func (o *Operation) WaitForCompletionContext(ctx context.Context) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	for {
-		status, err := o.fetchOperationsStatus()
+		status, err := o.fetchOperationsStatusContext(ctx)
 		if err != nil {
 			return err
 		}
@@ -80,7 +87,8 @@ func (o *Operation) WaitForCompletion() error {
 			}
 			return exceptionDispatcherGet(exceptionResult.Message, exceptionResult.Error, exceptionResult.Type, exceptionResult.StatusCode, nil)
 		}
-
-		time.Sleep(500 * time.Millisecond)
+		if err := waitForContext(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
 	}
 }

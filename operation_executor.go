@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"net/http"
 	"strings"
 )
@@ -37,29 +38,40 @@ func (e *OperationExecutor) ForDatabase(databaseName string) *OperationExecutor 
 // command and its result
 // sessionInfo can be nil
 func (e *OperationExecutor) Send(operation IOperation, sessionInfo *SessionInfo) error {
+	return e.SendContext(context.Background(), operation, sessionInfo)
+}
+
+func (e *OperationExecutor) SendContext(ctx context.Context, operation IOperation, sessionInfo *SessionInfo) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	command, err := operation.GetCommand(e.store, e.requestExecutor.GetConventions(), e.requestExecutor.Cache)
 	if err != nil {
 		return err
 	}
-	return e.requestExecutor.ExecuteCommand(command, sessionInfo)
+	return e.requestExecutor.ExecuteCommandContext(ctx, command, sessionInfo)
 }
 
 // sessionInfo can be nil
 func (e *OperationExecutor) SendAsync(operation IOperation, sessionInfo *SessionInfo) (*Operation, error) {
+	return e.SendAsyncContext(context.Background(), operation, sessionInfo)
+}
+
+func (e *OperationExecutor) SendAsyncContext(ctx context.Context, operation IOperation, sessionInfo *SessionInfo) (*Operation, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	command, err := operation.GetCommand(e.store, e.requestExecutor.GetConventions(), e.requestExecutor.Cache)
 	if err != nil {
 		return nil, err
 	}
-
-	if err = e.requestExecutor.ExecuteCommand(command, sessionInfo); err != nil {
+	if err = e.requestExecutor.ExecuteCommandContext(ctx, command, sessionInfo); err != nil {
 		return nil, err
 	}
-
 	changes := func() *DatabaseChanges {
 		return e.store.Changes("")
 	}
 	result := getCommandOperationIDResult(command)
-
 	return NewOperation(e.requestExecutor, changes, e.requestExecutor.GetConventions(), result.OperationID), nil
 }
 
@@ -68,13 +80,20 @@ func (e *OperationExecutor) SendAsync(operation IOperation, sessionInfo *Session
 // public PatchStatus Send(PatchOperation operation, SessionInfo sessionInfo) {
 
 func (e *OperationExecutor) SendPatchOperation(operation *PatchOperation, sessionInfo *SessionInfo) (*PatchOperationResult, error) {
+	return e.SendPatchOperationContext(context.Background(), operation, sessionInfo)
+}
+
+func (e *OperationExecutor) SendPatchOperationContext(ctx context.Context, operation *PatchOperation, sessionInfo *SessionInfo) (*PatchOperationResult, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	conventions := e.requestExecutor.GetConventions()
 	cache := e.requestExecutor.Cache
 	command, err := operation.GetCommand(e.store, conventions, cache)
 	if err != nil {
 		return nil, err
 	}
-	if err = e.requestExecutor.ExecuteCommand(command, sessionInfo); err != nil {
+	if err = e.requestExecutor.ExecuteCommandContext(ctx, command, sessionInfo); err != nil {
 		return nil, err
 	}
 

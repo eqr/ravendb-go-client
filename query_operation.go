@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
@@ -156,7 +157,7 @@ func (o *queryOperation) complete(results interface{}) error {
 
 func jsonIsValueNode(v interface{}) bool {
 	switch v.(type) {
-	case string, float64, bool:
+	case string, float64, int64, uint64, json.Number, bool:
 		return true
 	case []interface{}, map[string]interface{}:
 		return false

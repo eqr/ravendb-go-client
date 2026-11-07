@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"reflect"
 	"strconv"
 	"strings"
@@ -2052,8 +2053,11 @@ func (q *abstractDocumentQuery) assertIsDynamicQuery(dynamicField DynamicSpatial
 	return nil
 }
 
-func (q *abstractDocumentQuery) initSync() error {
-	if q.queryOperation != nil {
+func (q *abstractDocumentQuery) initSyncContext(ctx context.Context) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
+	if q.queryOperation != nil && q.queryOperation.currentQueryResults != nil {
 		return nil
 	}
 
@@ -2071,38 +2075,33 @@ func (q *abstractDocumentQuery) initSync() error {
 	if err != nil {
 		return err
 	}
-	return q.executeActualQuery()
+	return q.executeActualQueryContext(ctx)
 }
 
-func (q *abstractDocumentQuery) executeActualQuery() error {
-	{
-		context := q.queryOperation.enterQueryContext()
-		defer func() {
-			_ = context.Close()
-		}()
+func (q *abstractDocumentQuery) executeActualQueryContext(ctx context.Context) error {
+	queryContext := q.queryOperation.enterQueryContext()
+	defer func() {
+		_ = queryContext.Close()
+	}()
 
-		command, err := q.queryOperation.createRequest()
-		if err != nil {
-			return err
-		}
-		if err = q.theSession.GetRequestExecutor().ExecuteCommand(command, q.theSession.sessionInfo); err != nil {
-			return err
-		}
-		if err = q.queryOperation.setResult(command.Result); err != nil {
-			return err
-		}
+	command, err := q.queryOperation.createRequest()
+	if err != nil {
+		return err
+	}
+	if err = q.theSession.GetRequestExecutor().ExecuteCommandContext(ctx, command, q.theSession.sessionInfo); err != nil {
+		return err
+	}
+	if err = q.queryOperation.setResult(command.Result); err != nil {
+		return err
 	}
 	q.invokeAfterQueryExecuted(q.queryOperation.currentQueryResults)
 	return nil
 }
 
-// GetQueryResult returns results of a query
-func (q *abstractDocumentQuery) getQueryResult() (*QueryResult, error) {
-	err := q.initSync()
-	if err != nil {
+func (q *abstractDocumentQuery) getQueryResultContext(ctx context.Context) (*QueryResult, error) {
+	if err := q.initSyncContext(ctx); err != nil {
 		return nil, err
 	}
-
 	return q.queryOperation.currentQueryResults.createSnapshot(), nil
 }
 
@@ -2115,14 +2114,21 @@ func checkValidGetResultsArg(v interface{}, argName string) error {
 // GetResults executes the query and sets results to returned values.
 // results should be of type *[]<type>
 func (q *abstractDocumentQuery) GetResults(results interface{}) error {
-	// Note: in Java it's called ToList
+	return q.GetResultsContext(context.Background(), results)
+}
+
+// GetResultsContext executes the query using caller-scoped cancellation.
+func (q *abstractDocumentQuery) GetResultsContext(ctx context.Context, results interface{}) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if q.err != nil {
 		return q.err
 	}
 	if q.err = checkValidGetResultsArg(results, "results"); q.err != nil {
 		return q.err
 	}
-	return q.executeQueryOperation(results, -1)
+	return q.executeQueryOperationContext(ctx, results, -1)
 }
 
 func checkValidSingleArg(v interface{}, argName string) error {
@@ -2134,112 +2140,121 @@ func checkValidSingleArg(v interface{}, argName string) error {
 
 // First runs a query and returns a first result.
 func (q *abstractDocumentQuery) First(result interface{}) error {
+	return q.FirstContext(context.Background(), result)
+}
+
+func (q *abstractDocumentQuery) FirstContext(ctx context.Context, result interface{}) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if q.err != nil {
 		return q.err
 	}
-
 	if q.err = checkValidSingleArg(result, "result"); q.err != nil {
 		return q.err
 	}
-
 	tp := reflect.TypeOf(result)
-	// **struct => *struct
 	if tp.Kind() == reflect.Ptr && tp.Elem().Kind() == reflect.Ptr {
 		tp = tp.Elem()
 	}
-	// create a pointer to a slice. executeQueryOperation creates the actual slice
-	sliceType := reflect.SliceOf(tp)
-	slicePtr := reflect.New(sliceType)
-	err := q.executeQueryOperation(slicePtr.Interface(), 1)
-	if err != nil {
+	slicePtr := reflect.New(reflect.SliceOf(tp))
+	if err := q.executeQueryOperationContext(ctx, slicePtr.Interface(), 1); err != nil {
 		return err
 	}
 	slice := slicePtr.Elem()
 	if slice.Len() == 0 {
 		return nil
 	}
-	el := slice.Index(0)
-	return setInterfaceToValue(result, el.Interface())
+	return setInterfaceToValue(result, slice.Index(0).Interface())
 }
 
 // Single runs a query that expects only a single result.
 // If there is more than one result, it returns IllegalStateError.
 func (q *abstractDocumentQuery) Single(result interface{}) error {
+	return q.SingleContext(context.Background(), result)
+}
+
+func (q *abstractDocumentQuery) SingleContext(ctx context.Context, result interface{}) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if q.err != nil {
 		return q.err
 	}
-
 	if q.err = checkValidSingleArg(result, "result"); q.err != nil {
 		return q.err
 	}
-
 	tp := reflect.TypeOf(result)
-	// **struct => *struct
 	if tp.Kind() == reflect.Ptr && tp.Elem().Kind() == reflect.Ptr {
 		tp = tp.Elem()
 	}
-	// create a pointer to a slice. executeQueryOperation creates the actual slice
-	sliceType := reflect.SliceOf(tp)
-	slicePtr := reflect.New(sliceType)
-	err := q.executeQueryOperation(slicePtr.Interface(), 2)
-	if err != nil {
+	slicePtr := reflect.New(reflect.SliceOf(tp))
+	if err := q.executeQueryOperationContext(ctx, slicePtr.Interface(), 2); err != nil {
 		return err
 	}
 	slice := slicePtr.Elem()
 	if slice.Len() != 1 {
 		return newIllegalStateError("Expected single result, got: %d", slice.Len())
 	}
-	el := slice.Index(0)
-	return setInterfaceToValue(result, el.Interface())
+	return setInterfaceToValue(result, slice.Index(0).Interface())
 }
 
 func (q *abstractDocumentQuery) Count() (int, error) {
+	return q.CountContext(context.Background())
+}
+
+func (q *abstractDocumentQuery) CountContext(ctx context.Context) (int, error) {
+	if err := validateContext(ctx); err != nil {
+		return 0, err
+	}
 	if q.err != nil {
 		return 0, q.err
 	}
 	q.take(0)
-	queryResult, err := q.getQueryResult()
+	queryResult, err := q.getQueryResultContext(ctx)
 	if err != nil {
 		return 0, err
 	}
 	return queryResult.TotalResults, nil
 }
 
-// Any returns true if query returns at least one result
+// Any returns true if query returns at least one result.
 func (q *abstractDocumentQuery) Any() (bool, error) {
+	return q.AnyContext(context.Background())
+}
+
+func (q *abstractDocumentQuery) AnyContext(ctx context.Context) (bool, error) {
+	if err := validateContext(ctx); err != nil {
+		return false, err
+	}
 	if q.err != nil {
 		return false, q.err
 	}
 	if q.isDistinct() {
-		// for distinct it is cheaper to do count 1
-
 		q.take(1)
-
-		err := q.initSync()
-		if err != nil {
+		if err := q.initSyncContext(ctx); err != nil {
 			return false, err
 		}
 		return q.queryOperation.currentQueryResults.TotalResults > 0, nil
 	}
-
 	q.take(0)
-	queryResult, err := q.getQueryResult()
+	queryResult, err := q.getQueryResultContext(ctx)
 	if err != nil {
 		return false, err
 	}
 	return queryResult.TotalResults > 0, nil
 }
 
-func (q *abstractDocumentQuery) executeQueryOperation(results interface{}, take int) error {
+func (q *abstractDocumentQuery) executeQueryOperationContext(ctx context.Context, results interface{}, take int) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if take != -1 && (q.pageSize == nil || *q.pageSize > take) {
 		q.take(take)
 	}
-
-	err := q.initSync()
-	if err != nil {
+	if err := q.initSyncContext(ctx); err != nil {
 		return err
 	}
-
 	return q.queryOperation.complete(results)
 }
 

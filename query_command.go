@@ -66,6 +66,16 @@ func (c *QueryCommand) SetResponse(response []byte, fromCache bool) error {
 	if len(response) == 0 {
 		return nil
 	}
-
-	return jsonUnmarshal(response, &c.Result)
+	if err := jsonUnmarshal(response, &c.Result); err != nil {
+		return err
+	}
+	if c.Result == nil {
+		return nil
+	}
+	for _, result := range c.Result.Results {
+		if err := normalizeJSONNumberMap(result); err != nil {
+			return err
+		}
+	}
+	return normalizeJSONNumberMap(c.Result.Includes)
 }

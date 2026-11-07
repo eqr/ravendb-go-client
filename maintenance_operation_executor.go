@@ -1,6 +1,9 @@
 package ravendb
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 type MaintenanceOperationExecutor struct {
 	store                   *DocumentStore
@@ -46,6 +49,13 @@ func (e *MaintenanceOperationExecutor) ForDatabase(databaseName string) *Mainten
 }
 
 func (e *MaintenanceOperationExecutor) Send(operation IMaintenanceOperation) error {
+	return e.SendContext(context.Background(), operation)
+}
+
+func (e *MaintenanceOperationExecutor) SendContext(ctx context.Context, operation IMaintenanceOperation) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if err := e.assertDatabaseNameSet(); err != nil {
 		return err
 	}
@@ -53,10 +63,17 @@ func (e *MaintenanceOperationExecutor) Send(operation IMaintenanceOperation) err
 	if err != nil {
 		return err
 	}
-	return e.GetRequestExecutor().ExecuteCommand(command, nil)
+	return e.GetRequestExecutor().ExecuteCommandContext(ctx, command, nil)
 }
 
 func (e *MaintenanceOperationExecutor) SendAsync(operation IMaintenanceOperation) (*Operation, error) {
+	return e.SendAsyncContext(context.Background(), operation)
+}
+
+func (e *MaintenanceOperationExecutor) SendAsyncContext(ctx context.Context, operation IMaintenanceOperation) (*Operation, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	if err := e.assertDatabaseNameSet(); err != nil {
 		return nil, err
 	}
@@ -64,7 +81,7 @@ func (e *MaintenanceOperationExecutor) SendAsync(operation IMaintenanceOperation
 	if err != nil {
 		return nil, err
 	}
-	if err = e.GetRequestExecutor().ExecuteCommand(command, nil); err != nil {
+	if err = e.GetRequestExecutor().ExecuteCommandContext(ctx, command, nil); err != nil {
 		return nil, err
 	}
 	fn := func() *DatabaseChanges {

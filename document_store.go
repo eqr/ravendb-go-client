@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"strings"
@@ -346,13 +347,27 @@ func (s *DocumentStore) OpenSessionWithOptions(options *SessionOptions) (*Docume
 }
 
 func (s *DocumentStore) ExecuteIndex(task *IndexCreationTask, database string) error {
+	return s.ExecuteIndexContext(context.Background(), task, database)
+}
+
+func (s *DocumentStore) ExecuteIndexContext(ctx context.Context, task *IndexCreationTask, database string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if err := s.assertInitialized(); err != nil {
 		return err
 	}
-	return task.Execute(s, s.conventions, database)
+	return task.ExecuteContext(ctx, s, s.conventions, database)
 }
 
 func (s *DocumentStore) ExecuteIndexes(tasks []*IndexCreationTask, database string) error {
+	return s.ExecuteIndexesContext(context.Background(), tasks, database)
+}
+
+func (s *DocumentStore) ExecuteIndexesContext(ctx context.Context, tasks []*IndexCreationTask, database string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if err := s.assertInitialized(); err != nil {
 		return err
 	}
@@ -362,7 +377,7 @@ func (s *DocumentStore) ExecuteIndexes(tasks []*IndexCreationTask, database stri
 	if database == "" {
 		database = s.GetDatabase()
 	}
-	return s.Maintenance().ForDatabase(database).Send(op)
+	return s.Maintenance().ForDatabase(database).SendContext(ctx, op)
 }
 
 // GetRequestExecutor gets a request executor.

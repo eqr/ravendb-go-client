@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -185,6 +186,18 @@ func convertFloat64ToType(v float64, typ reflect.Type) interface{} {
 	return int(0)
 }
 
+func jsonNumberToType(value interface{}, typ reflect.Type) (interface{}, error) {
+	data, err := jsonMarshal(value)
+	if err != nil {
+		return nil, err
+	}
+	result := reflect.New(typ)
+	if err := jsonUnmarshal(data, result.Interface()); err != nil {
+		return nil, err
+	}
+	return result.Elem().Interface(), nil
+}
+
 func treeToValue(typ reflect.Type, js interface{}) (interface{}, error) {
 	// TODO: should also handle primitive types
 	switch v := js.(type) {
@@ -195,6 +208,28 @@ func treeToValue(typ reflect.Type, js interface{}) (interface{}, error) {
 		panicIf(true, "don't know how to convert value of type %T to reflect type %s", js, typ.Name())
 	case float64:
 		return convertFloat64ToType(v, typ), nil
+	case int:
+		return jsonNumberToType(v, typ)
+	case int8:
+		return jsonNumberToType(v, typ)
+	case int16:
+		return jsonNumberToType(v, typ)
+	case int32:
+		return jsonNumberToType(v, typ)
+	case int64:
+		return jsonNumberToType(v, typ)
+	case uint:
+		return jsonNumberToType(v, typ)
+	case uint8:
+		return jsonNumberToType(v, typ)
+	case uint16:
+		return jsonNumberToType(v, typ)
+	case uint32:
+		return jsonNumberToType(v, typ)
+	case uint64:
+		return jsonNumberToType(v, typ)
+	case json.Number:
+		return jsonNumberToType(v, typ)
 	case bool:
 		panicIf(true, "don't know how to convert value of type %T to reflect type %s", js, typ.Name())
 	case []interface{}:
@@ -319,16 +354,10 @@ func convertValue(val interface{}, clazz reflect.Type) (interface{}, error) {
 		default:
 			panicIf(true, "%s", dbglog("converting of type %T to string NYI", val))
 		}
-	case reflect.Int:
-		switch v := val.(type) {
-		case int:
-			return v, nil
-		case float64:
-			res := int(v)
-			return res, nil
-		default:
-			panicIf(true, "%s", dbglog("converting of type %T to reflect.Int NYI", val))
-		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return jsonNumberToType(val, clazz)
 	case reflect.Ptr:
 		clazz2 := clazz.Elem()
 		switch clazz2.Kind() {

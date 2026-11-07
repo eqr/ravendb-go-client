@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"reflect"
 	"time"
 )
@@ -28,6 +29,13 @@ func newSuggestionDocumentQuery(source *DocumentQuery) *SuggestionDocumentQuery 
 }
 
 func (q *SuggestionDocumentQuery) Execute() (map[string]*SuggestionResult, error) {
+	return q.ExecuteContext(context.Background())
+}
+
+func (q *SuggestionDocumentQuery) ExecuteContext(ctx context.Context) (map[string]*SuggestionResult, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	if q.err != nil {
 		return nil, q.err
 	}
@@ -40,13 +48,12 @@ func (q *SuggestionDocumentQuery) Execute() (map[string]*SuggestionResult, error
 	if err = q.session.incrementRequestCount(); err != nil {
 		return nil, err
 	}
-	if err = q.session.GetRequestExecutor().ExecuteCommand(command, nil); err != nil {
+	if err = q.session.GetRequestExecutor().ExecuteCommandContext(ctx, command, nil); err != nil {
 		return nil, err
 	}
 
 	return q.processResults(command.Result, q.session.GetConventions())
 }
-
 func (q *SuggestionDocumentQuery) processResults(queryResult *QueryResult, conventions *DocumentConventions) (map[string]*SuggestionResult, error) {
 	q.InvokeAfterQueryExecuted(queryResult)
 

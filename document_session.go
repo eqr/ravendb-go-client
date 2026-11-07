@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,6 +45,10 @@ func (s *EagerSessionOperations) ExecuteAllPendingLazyOperations() (*ResponseTim
 	return s.s.executeAllPendingLazyOperations()
 }
 
+func (s *EagerSessionOperations) ExecuteAllPendingLazyOperationsContext(ctx context.Context) (*ResponseTimeInformation, error) {
+	return s.s.executeAllPendingLazyOperationsContext(ctx)
+}
+
 func (s *DocumentSession) Eagerly() *EagerSessionOperations {
 	return &EagerSessionOperations{
 		s: s,
@@ -84,8 +89,16 @@ func newDocumentSessionBase(dbName string, documentStore *DocumentStore, id stri
 	return res
 }
 
-// SaveChanges saves changes queued in memory to the database
+// SaveChanges saves changes queued in memory to the database.
 func (s *DocumentSession) SaveChanges() error {
+	return s.SaveChangesContext(context.Background())
+}
+
+// SaveChangesContext saves queued changes using caller-scoped cancellation.
+func (s *DocumentSession) SaveChangesContext(ctx context.Context) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	saveChangeOperation := newBatchOperation(s.InMemoryDocumentSessionOperations)
 
 	command, err := saveChangeOperation.createRequest()
@@ -98,7 +111,7 @@ func (s *DocumentSession) SaveChanges() error {
 	defer func() {
 		_ = command.Close()
 	}()
-	err = s.requestExecutor.ExecuteCommand(command, s.sessionInfo)
+	err = s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo)
 	if err != nil {
 		return err
 	}
@@ -106,8 +119,16 @@ func (s *DocumentSession) SaveChanges() error {
 	return saveChangeOperation.setResult(result)
 }
 
-// Exists returns true if an entity with a given id exists in the database
+// Exists returns true if an entity with a given id exists in the database.
 func (s *DocumentSession) Exists(id string) (bool, error) {
+	return s.ExistsContext(context.Background(), id)
+}
+
+// ExistsContext checks for a document using caller-scoped cancellation.
+func (s *DocumentSession) ExistsContext(ctx context.Context, id string) (bool, error) {
+	if err := validateContext(ctx); err != nil {
+		return false, err
+	}
 	if id == "" {
 		return false, newIllegalArgumentError("id cannot be empty string")
 	}
@@ -121,7 +142,7 @@ func (s *DocumentSession) Exists(id string) (bool, error) {
 	}
 	command := NewHeadDocumentCommand(id, nil)
 
-	if err := s.requestExecutor.ExecuteCommand(command, s.sessionInfo); err != nil {
+	if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return false, err
 	}
 
@@ -129,8 +150,16 @@ func (s *DocumentSession) Exists(id string) (bool, error) {
 	return ok, nil
 }
 
-// Refresh reloads information about a given entity in the session from the database
+// Refresh reloads information about a given entity in the session from the database.
 func (s *DocumentSession) Refresh(entity interface{}) error {
+	return s.RefreshContext(context.Background(), entity)
+}
+
+// RefreshContext reloads information using caller-scoped cancellation.
+func (s *DocumentSession) RefreshContext(ctx context.Context, entity interface{}) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if err := checkValidEntityIn(entity, "entity"); err != nil {
 		return err
 	}
@@ -146,7 +175,7 @@ func (s *DocumentSession) Refresh(entity interface{}) error {
 	if err != nil {
 		return err
 	}
-	if err = s.requestExecutor.ExecuteCommand(command, s.sessionInfo); err != nil {
+	if err = s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return err
 	}
 	return s.refreshInternal(entity, command, documentInfo)
@@ -155,6 +184,13 @@ func (s *DocumentSession) Refresh(entity interface{}) error {
 // TODO:    protected string generateID(Object entity) {
 
 func (s *DocumentSession) executeAllPendingLazyOperations() (*ResponseTimeInformation, error) {
+	return s.executeAllPendingLazyOperationsContext(context.Background())
+}
+
+func (s *DocumentSession) executeAllPendingLazyOperationsContext(ctx context.Context) (*ResponseTimeInformation, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	var requests []*getRequest
 	var pendingTmp []ILazyOperation
 	for _, op := range s.pendingLazyOperations {
@@ -180,14 +216,16 @@ func (s *DocumentSession) executeAllPendingLazyOperations() (*ResponseTimeInform
 
 	responseTimeDuration := &ResponseTimeInformation{}
 	for {
-		shouldRetry, err := s.executeLazyOperationsSingleStep(responseTimeDuration, requests)
+		shouldRetry, err := s.executeLazyOperationsSingleStep(ctx, responseTimeDuration, requests)
 		if err != nil {
 			return nil, err
 		}
 		if !shouldRetry {
 			break
 		}
-		time.Sleep(time.Millisecond * 100)
+		if err := waitForContext(ctx, time.Millisecond*100); err != nil {
+			return nil, err
+		}
 	}
 	responseTimeDuration.computeServerTotal()
 
@@ -208,13 +246,13 @@ func (s *DocumentSession) executeAllPendingLazyOperations() (*ResponseTimeInform
 	return responseTimeDuration, nil
 }
 
-func (s *DocumentSession) executeLazyOperationsSingleStep(responseTimeInformation *ResponseTimeInformation, requests []*getRequest) (bool, error) {
+func (s *DocumentSession) executeLazyOperationsSingleStep(ctx context.Context, responseTimeInformation *ResponseTimeInformation, requests []*getRequest) (bool, error) {
 	multiGetOperation := &MultiGetOperation{
 		session: s.InMemoryDocumentSessionOperations,
 	}
 	multiGetCommand := multiGetOperation.createRequest(requests)
 
-	err := s.GetRequestExecutor().ExecuteCommand(multiGetCommand, s.sessionInfo)
+	err := s.GetRequestExecutor().ExecuteCommandContext(ctx, multiGetCommand, s.sessionInfo)
 	if err != nil {
 		return false, err
 	}
@@ -337,6 +375,14 @@ func checkValidLoadArg(v interface{}, argName string) error {
 // Load loads an entity with a given id and sets result to it.
 // result should be of type **<struct> or *map[string]interface{}
 func (s *DocumentSession) Load(result interface{}, id string) error {
+	return s.LoadContext(context.Background(), result, id)
+}
+
+// LoadContext loads an entity using caller-scoped cancellation.
+func (s *DocumentSession) LoadContext(ctx context.Context, result interface{}, id string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if id == "" {
 		return newIllegalArgumentError("id cannot be empty string")
 	}
@@ -344,23 +390,18 @@ func (s *DocumentSession) Load(result interface{}, id string) error {
 		return err
 	}
 	loadOperation := NewLoadOperation(s.InMemoryDocumentSessionOperations)
-
 	loadOperation.byID(id)
 
 	command, err := loadOperation.createRequest()
 	if err != nil {
 		return err
 	}
-
 	if command != nil {
-		err := s.requestExecutor.ExecuteCommand(command, s.sessionInfo)
-		if err != nil {
+		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return err
 		}
-		result := command.Result
-		loadOperation.setResult(result)
+		loadOperation.setResult(command.Result)
 	}
-
 	return loadOperation.getDocument(result)
 }
 
@@ -396,6 +437,13 @@ func checkValidLoadMultiArg(v interface{}, argName string) error {
 // LoadMulti loads multiple values with given ids into results, which should
 // be a map from string (id) to pointer to struct
 func (s *DocumentSession) LoadMulti(results interface{}, ids []string) error {
+	return s.LoadMultiContext(context.Background(), results, ids)
+}
+
+func (s *DocumentSession) LoadMultiContext(ctx context.Context, results interface{}, ids []string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if len(ids) == 0 {
 		return newIllegalArgumentError("ids cannot be empty array")
 	}
@@ -403,14 +451,16 @@ func (s *DocumentSession) LoadMulti(results interface{}, ids []string) error {
 		return err
 	}
 	loadOperation := NewLoadOperation(s.InMemoryDocumentSessionOperations)
-	err := s.loadInternalWithOperation(ids, loadOperation, nil)
-	if err != nil {
+	if err := s.loadInternalWithOperationContext(ctx, ids, loadOperation, nil); err != nil {
 		return err
 	}
 	return loadOperation.getDocuments(results)
 }
 
-func (s *DocumentSession) loadInternalWithOperation(ids []string, operation *LoadOperation, stream io.Writer) error {
+func (s *DocumentSession) loadInternalWithOperationContext(ctx context.Context, ids []string, operation *LoadOperation, stream io.Writer) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	operation.byIds(ids)
 
 	command, err := operation.createRequest()
@@ -418,11 +468,9 @@ func (s *DocumentSession) loadInternalWithOperation(ids []string, operation *Loa
 		return err
 	}
 	if command != nil {
-		err := s.requestExecutor.ExecuteCommand(command, s.sessionInfo)
-		if err != nil {
+		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return err
 		}
-
 		if stream != nil {
 			result := command.Result
 			enc := json.NewEncoder(stream)
@@ -436,7 +484,11 @@ func (s *DocumentSession) loadInternalWithOperation(ids []string, operation *Loa
 }
 
 // results should be map[string]*struct
-func (s *DocumentSession) loadInternalMulti(results interface{}, ids []string, includes []string) error {
+
+func (s *DocumentSession) loadInternalMultiContext(ctx context.Context, results interface{}, ids []string, includes []string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if len(ids) == 0 {
 		return newIllegalArgumentError("ids cannot be empty array")
 	}
@@ -450,23 +502,28 @@ func (s *DocumentSession) loadInternalMulti(results interface{}, ids []string, i
 		return err
 	}
 	if command != nil {
-		err := s.requestExecutor.ExecuteCommand(command, s.sessionInfo)
-		if err != nil {
+		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return err
 		}
 		loadOperation.setResult(command.Result)
 	}
-
 	return loadOperation.getDocuments(results)
 }
 
 func (s *DocumentSession) LoadStartingWith(results interface{}, args *StartsWithArgs) error {
+	return s.LoadStartingWithContext(context.Background(), results, args)
+}
+
+func (s *DocumentSession) LoadStartingWithContext(ctx context.Context, results interface{}, args *StartsWithArgs) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	// TODO: early validation of results
 	loadStartingWithOperation := NewLoadStartingWithOperation(s.InMemoryDocumentSessionOperations)
 	if args.PageSize == 0 {
 		args.PageSize = 25
 	}
-	_, err := s.loadStartingWithInternal(args.StartsWith, loadStartingWithOperation, nil, args.Matches, args.Start, args.PageSize, args.Exclude, args.StartAfter)
+	_, err := s.loadStartingWithInternal(ctx, args.StartsWith, loadStartingWithOperation, nil, args.Matches, args.Start, args.PageSize, args.Exclude, args.StartAfter)
 	if err != nil {
 		return err
 	}
@@ -474,6 +531,13 @@ func (s *DocumentSession) LoadStartingWith(results interface{}, args *StartsWith
 }
 
 func (s *DocumentSession) LoadStartingWithIntoStream(output io.Writer, args *StartsWithArgs) error {
+	return s.LoadStartingWithIntoStreamContext(context.Background(), output, args)
+}
+
+func (s *DocumentSession) LoadStartingWithIntoStreamContext(ctx context.Context, output io.Writer, args *StartsWithArgs) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if output == nil {
 		return newIllegalArgumentError("Output cannot be null")
 	}
@@ -484,13 +548,15 @@ func (s *DocumentSession) LoadStartingWithIntoStream(output io.Writer, args *Sta
 	if args.PageSize == 0 {
 		args.PageSize = 25
 	}
-	_, err := s.loadStartingWithInternal(args.StartsWith, loadStartingWithOperation, output, args.Matches, args.Start, args.PageSize, args.Exclude, args.StartAfter)
+	_, err := s.loadStartingWithInternal(ctx, args.StartsWith, loadStartingWithOperation, output, args.Matches, args.Start, args.PageSize, args.Exclude, args.StartAfter)
 	return err
 }
 
-func (s *DocumentSession) loadStartingWithInternal(idPrefix string, operation *LoadStartingWithOperation, stream io.Writer,
+func (s *DocumentSession) loadStartingWithInternal(ctx context.Context, idPrefix string, operation *LoadStartingWithOperation, stream io.Writer,
 	matches string, start int, pageSize int, exclude string, startAfter string) (*GetDocumentsCommand, error) {
-
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	operation.withStartWithFull(idPrefix, matches, start, pageSize, exclude, startAfter)
 
 	command, err := operation.createRequest()
@@ -498,11 +564,9 @@ func (s *DocumentSession) loadStartingWithInternal(idPrefix string, operation *L
 		return nil, err
 	}
 	if command != nil {
-		err := s.requestExecutor.ExecuteCommand(command, s.sessionInfo)
-		if err != nil {
+		if err := s.requestExecutor.ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 			return nil, err
 		}
-
 		if stream != nil {
 			result := command.Result
 			enc := json.NewEncoder(stream)
@@ -516,14 +580,20 @@ func (s *DocumentSession) loadStartingWithInternal(idPrefix string, operation *L
 }
 
 // LoadIntoStream loads entities identified by ids and writes them (in JSON form)
-// to output
+// to output.
 func (s *DocumentSession) LoadIntoStream(ids []string, output io.Writer) error {
+	return s.LoadIntoStreamContext(context.Background(), ids, output)
+}
+
+func (s *DocumentSession) LoadIntoStreamContext(ctx context.Context, ids []string, output io.Writer) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if len(ids) == 0 {
 		return newIllegalArgumentError("Ids cannot be empty")
 	}
-
 	op := NewLoadOperation(s.InMemoryDocumentSessionOperations)
-	return s.loadInternalWithOperation(ids, op, output)
+	return s.loadInternalWithOperationContext(ctx, ids, op, output)
 }
 
 // Increment increments member identified by path in an entity by a given
@@ -865,6 +935,13 @@ func (s *DocumentSession) QueryIndex(indexName string) *DocumentQuery {
 // StreamQuery starts a streaming query and returns iterator for results.
 // If streamQueryStats is provided, it'll be filled with information about query statistics.
 func (s *DocumentSession) StreamQuery(query *DocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	return s.StreamQueryContext(context.Background(), query, streamQueryStats)
+}
+
+func (s *DocumentSession) StreamQueryContext(ctx context.Context, query *DocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, streamQueryStats)
 	q, err := query.GetIndexQuery()
 	if err != nil {
@@ -874,8 +951,7 @@ func (s *DocumentSession) StreamQuery(query *DocumentQuery, streamQueryStats *St
 	if err != nil {
 		return nil, err
 	}
-	err = s.GetRequestExecutor().ExecuteCommand(command, s.sessionInfo)
-	if err != nil {
+	if err = s.GetRequestExecutor().ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return nil, err
 	}
 	result, err := streamOperation.setResult(command.Result)
@@ -891,6 +967,13 @@ func (s *DocumentSession) StreamQuery(query *DocumentQuery, streamQueryStats *St
 // StreamRawQuery starts a raw streaming query and returns iterator for results.
 // If streamQueryStats is provided, it'll be filled with information about query statistics.
 func (s *DocumentSession) StreamRawQuery(query *RawDocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	return s.StreamRawQueryContext(context.Background(), query, streamQueryStats)
+}
+
+func (s *DocumentSession) StreamRawQueryContext(ctx context.Context, query *RawDocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, streamQueryStats)
 	q, err := query.GetIndexQuery()
 	if err != nil {
@@ -900,8 +983,7 @@ func (s *DocumentSession) StreamRawQuery(query *RawDocumentQuery, streamQuerySta
 	if err != nil {
 		return nil, err
 	}
-	err = s.GetRequestExecutor().ExecuteCommand(command, s.sessionInfo)
-	if err != nil {
+	if err = s.GetRequestExecutor().ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return nil, err
 	}
 	result, err := streamOperation.setResult(command.Result)
@@ -917,6 +999,13 @@ func (s *DocumentSession) StreamRawQuery(query *RawDocumentQuery, streamQuerySta
 // StreamRawQueryInto starts a raw streaming query that will write the results
 // (in JSON format) to output
 func (s *DocumentSession) StreamRawQueryInto(query *RawDocumentQuery, output io.Writer) error {
+	return s.StreamRawQueryIntoContext(context.Background(), query, output)
+}
+
+func (s *DocumentSession) StreamRawQueryIntoContext(ctx context.Context, query *RawDocumentQuery, output io.Writer) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, nil)
 	q, err := query.GetIndexQuery()
 	if err != nil {
@@ -926,34 +1015,36 @@ func (s *DocumentSession) StreamRawQueryInto(query *RawDocumentQuery, output io.
 	if err != nil {
 		return err
 	}
-	err = s.GetRequestExecutor().ExecuteCommand(command, s.sessionInfo)
-	if err != nil {
+	if err = s.GetRequestExecutor().ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return err
 	}
-	stream := command.Result.Stream
-	_, err = io.Copy(output, stream)
+	_, err = io.Copy(output, command.Result.Stream)
 	return err
 }
 
 // StreamQueryInto starts a streaming query that will write the results
 // (in JSON format) to output
 func (s *DocumentSession) StreamQueryInto(query *DocumentQuery, output io.Writer) error {
+	return s.StreamQueryIntoContext(context.Background(), query, output)
+}
+
+func (s *DocumentSession) StreamQueryIntoContext(ctx context.Context, query *DocumentQuery, output io.Writer) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, nil)
 	q, err := query.GetIndexQuery()
 	if err != nil {
 		return err
 	}
-
 	command, err := streamOperation.createRequestForIndexQuery(q)
 	if err != nil {
 		return err
 	}
-	err = s.GetRequestExecutor().ExecuteCommand(command, s.sessionInfo)
-	if err != nil {
+	if err = s.GetRequestExecutor().ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
 		return err
 	}
-	stream := command.Result.Stream
-	_, err = io.Copy(output, stream)
+	_, err = io.Copy(output, command.Result.Stream)
 	return err
 }
 
@@ -1000,16 +1091,21 @@ func (s *DocumentSession) createStreamResult(v interface{}, document map[string]
 	return streamResult, nil
 }
 
-// Stream starts an iteration and returns StreamIterator
+// Stream starts an iteration and returns StreamIterator.
 func (s *DocumentSession) Stream(args *StartsWithArgs) (*StreamIterator, error) {
-	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, nil)
+	return s.StreamContext(context.Background(), args)
+}
 
-	command := streamOperation.createRequest(args.StartsWith, args.Matches, args.Start, args.PageSize, "", args.StartAfter)
-	err := s.GetRequestExecutor().ExecuteCommand(command, s.sessionInfo)
-	if err != nil {
+// StreamContext starts an iteration using caller-scoped cancellation.
+func (s *DocumentSession) StreamContext(ctx context.Context, args *StartsWithArgs) (*StreamIterator, error) {
+	if err := validateContext(ctx); err != nil {
 		return nil, err
 	}
-
+	streamOperation := NewStreamOperation(s.InMemoryDocumentSessionOperations, nil)
+	command := streamOperation.createRequest(args.StartsWith, args.Matches, args.Start, args.PageSize, "", args.StartAfter)
+	if err := s.GetRequestExecutor().ExecuteCommandContext(ctx, command, s.sessionInfo); err != nil {
+		return nil, err
+	}
 	cmdResult := command.Result
 	result, err := streamOperation.setResult(cmdResult)
 	if err != nil {

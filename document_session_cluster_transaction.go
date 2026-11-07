@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"reflect"
 )
 
@@ -84,26 +85,49 @@ func (cto *ClusterTransactionOperations) prepareCompareExchangeEntities(result *
 }
 
 func (cto *ClusterTransactionOperations) GetCompareExchangeValue(clazz reflect.Type, key string) (*CompareExchangeValue, error) {
-	return cto.getCompareExchangeValueInternal(clazz, key)
+	return cto.GetCompareExchangeValueContext(context.Background(), clazz, key)
+}
 
+func (cto *ClusterTransactionOperations) GetCompareExchangeValueContext(ctx context.Context, clazz reflect.Type, key string) (*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
+	return cto.getCompareExchangeValueInternalContext(ctx, clazz, key)
 }
 
 func (cto *ClusterTransactionOperations) GetCompareExchangeValuesWithKeys(clazz reflect.Type, keys []string) (map[string]*CompareExchangeValue, error) {
-	return cto.getCompareExchangeValuesInternalWithKeys(clazz, keys)
+	return cto.GetCompareExchangeValuesWithKeysContext(context.Background(), clazz, keys)
+}
+
+func (cto *ClusterTransactionOperations) GetCompareExchangeValuesWithKeysContext(ctx context.Context, clazz reflect.Type, keys []string) (map[string]*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
+	return cto.getCompareExchangeValuesInternalWithKeysContext(ctx, clazz, keys)
 }
 
 func (cto *ClusterTransactionOperations) GetCompareExchangeValues(clazz reflect.Type, startsWith string, start int, pageSize int) (map[string]*CompareExchangeValue, error) {
-	return cto.getCompareExchangeValuesInternal(clazz, startsWith, start, pageSize)
+	return cto.GetCompareExchangeValuesContext(context.Background(), clazz, startsWith, start, pageSize)
 }
-func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternal(clazz reflect.Type, startsWith string, start int, pageSize int) (map[string]*CompareExchangeValue, error) {
-	cto.session.incrementRequestCount()
+
+func (cto *ClusterTransactionOperations) GetCompareExchangeValuesContext(ctx context.Context, clazz reflect.Type, startsWith string, start int, pageSize int) (map[string]*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
+	return cto.getCompareExchangeValuesInternalContext(ctx, clazz, startsWith, start, pageSize)
+}
+
+func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalContext(ctx context.Context, clazz reflect.Type, startsWith string, start int, pageSize int) (map[string]*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
+	_ = cto.session.incrementRequestCount()
 
 	operation, err := NewGetCompareExchangeValuesOperation(clazz, startsWith, start, pageSize)
 	if err != nil {
 		return nil, err
 	}
-	err = cto.session.GetOperations().Send(operation, cto.session.sessionInfo)
-	if err != nil {
+	if err = cto.session.GetOperations().SendContext(ctx, operation, cto.session.sessionInfo); err != nil {
 		return nil, err
 	}
 
@@ -111,7 +135,6 @@ func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternal(clazz 
 	results := make(map[string]*CompareExchangeValue)
 
 	for _, value := range operationResult {
-
 		sessionValue, err := cto.registerCompareExchangeValue(value)
 		if err != nil {
 			return nil, err
@@ -120,14 +143,16 @@ func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternal(clazz 
 		if err != nil {
 			return nil, err
 		}
-
 		results[value.GetKey()] = resultValue
 	}
 
 	return results, nil
 }
 
-func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalWithKeys(clazz reflect.Type, keys []string) (map[string]*CompareExchangeValue, error) {
+func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalWithKeysContext(ctx context.Context, clazz reflect.Type, keys []string) (map[string]*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	results, notTracked, err := cto.getCompareExchangeValuesWithKeysFromSessionInternal(clazz, keys)
 	if err != nil {
 		return nil, err
@@ -137,14 +162,13 @@ func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalWithKey
 		return results, nil
 	}
 
-	cto.session.incrementRequestCount()
+	_ = cto.session.incrementRequestCount()
 
 	operation, err := NewGetCompareExchangeValuesOperationWithKeys(clazz, notTracked)
 	if err != nil {
 		return nil, err
 	}
-	err = cto.session.GetOperations().Send(operation, cto.session.sessionInfo)
-	if err != nil {
+	if err = cto.session.GetOperations().SendContext(ctx, operation, cto.session.sessionInfo); err != nil {
 		return nil, err
 	}
 
@@ -152,9 +176,8 @@ func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalWithKey
 
 	for _, key := range notTracked {
 		value, exists := operationResult[key]
-
-		if exists == false || value == nil {
-			cto.registerMissingCompareExchangeValue(key)
+		if !exists || value == nil {
+			_, _ = cto.registerMissingCompareExchangeValue(key)
 			results[key] = nil
 			continue
 		}
@@ -167,44 +190,42 @@ func (cto *ClusterTransactionOperations) getCompareExchangeValuesInternalWithKey
 		if err != nil {
 			return nil, err
 		}
-
 		results[value.GetKey()] = resultValue
 	}
 
 	return results, nil
 }
 
-func (cto *ClusterTransactionOperations) getCompareExchangeValueInternal(clazz reflect.Type, key string) (*CompareExchangeValue, error) {
+func (cto *ClusterTransactionOperations) getCompareExchangeValueInternalContext(ctx context.Context, clazz reflect.Type, key string) (*CompareExchangeValue, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	v, notTracked := cto.getCompareExchangeValueFromSessionInternal(clazz, key)
-	if notTracked == false {
+	if !notTracked {
 		return v, nil
 	}
 
-	cto.session.incrementRequestCount()
+	_ = cto.session.incrementRequestCount()
 
 	operation, err := NewGetCompareExchangeValueOperation(clazz, key)
 	if err != nil {
 		return nil, err
 	}
-
-	err = cto.session.GetOperations().Send(operation, cto.session.sessionInfo)
-	if err != nil {
+	if err = cto.session.GetOperations().SendContext(ctx, operation, cto.session.sessionInfo); err != nil {
 		return nil, err
 	}
 
 	value := operation.Command.Result
 	if value == nil {
-		cto.registerMissingCompareExchangeValue(key)
+		_, _ = cto.registerMissingCompareExchangeValue(key)
 		return nil, nil
 	}
 
 	sessionValue, err := cto.registerCompareExchangeValue(value)
-
-	if err == nil && sessionValue != nil {
-		return sessionValue.GetValue(clazz, cto.session)
+	if err != nil || sessionValue == nil {
+		return nil, err
 	}
-
-	return nil, err
+	return sessionValue.GetValue(clazz, cto.session)
 }
 
 func (cto *ClusterTransactionOperations) registerCompareExchangeValue(value *CompareExchangeValue) (*CompareExchangeSessionValue, error) {

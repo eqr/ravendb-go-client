@@ -1,5 +1,7 @@
 package ravendb
 
+import "context"
+
 // Note: IndexCreationTask combines functionality of Java's
 // AbstractIndexCreationTask and AbstractMultiMapIndexCreationTask
 
@@ -79,12 +81,19 @@ func (t *IndexCreationTask) IsMapReduce() bool {
 	return t.Reduce != ""
 }
 
-// Execute executes index in specified document store
+// Execute executes index in specified document store.
 func (t *IndexCreationTask) Execute(store *DocumentStore, conventions *DocumentConventions, database string) error {
-	return t.putIndex(store, conventions, database)
+	return t.ExecuteContext(context.Background(), store, conventions, database)
 }
 
-func (t *IndexCreationTask) putIndex(store *DocumentStore, conventions *DocumentConventions, database string) error {
+func (t *IndexCreationTask) ExecuteContext(ctx context.Context, store *DocumentStore, conventions *DocumentConventions, database string) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
+	return t.putIndexContext(ctx, store, conventions, database)
+}
+
+func (t *IndexCreationTask) putIndexContext(ctx context.Context, store *DocumentStore, conventions *DocumentConventions, database string) error {
 	oldConventions := t.Conventions
 	defer func() { t.Conventions = oldConventions }()
 
@@ -106,7 +115,7 @@ func (t *IndexCreationTask) putIndex(store *DocumentStore, conventions *Document
 	if database == "" {
 		database = store.GetDatabase()
 	}
-	return store.Maintenance().ForDatabase(database).Send(op)
+	return store.Maintenance().ForDatabase(database).SendContext(ctx, op)
 }
 
 // Index registers field to be indexed

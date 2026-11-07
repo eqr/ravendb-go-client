@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"io"
 	"reflect"
 	"time"
@@ -83,6 +84,11 @@ func (o *AdvancedSessionOperations) Refresh(entity interface{}) error {
 	return o.s.Refresh(entity)
 }
 
+// RefreshContext reloads an entity using caller-scoped cancellation.
+func (o *AdvancedSessionOperations) RefreshContext(ctx context.Context, entity interface{}) error {
+	return o.s.RefreshContext(ctx, entity)
+}
+
 func (o *AdvancedSessionOperations) RawQuery(rawQuery string) *RawDocumentQuery {
 	return o.s.RawQuery(rawQuery)
 }
@@ -106,21 +112,36 @@ func (o *AdvancedSessionOperations) QueryIndex(indexName string) *DocumentQuery 
 func (o *AdvancedSessionOperations) StreamQuery(query *DocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
 	return o.s.StreamQuery(query, streamQueryStats)
 }
+func (o *AdvancedSessionOperations) StreamQueryContext(ctx context.Context, query *DocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	return o.s.StreamQueryContext(ctx, query, streamQueryStats)
+}
 
 func (o *AdvancedSessionOperations) StreamRawQuery(query *RawDocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
 	return o.s.StreamRawQuery(query, streamQueryStats)
+}
+func (o *AdvancedSessionOperations) StreamRawQueryContext(ctx context.Context, query *RawDocumentQuery, streamQueryStats *StreamQueryStatistics) (*StreamIterator, error) {
+	return o.s.StreamRawQueryContext(ctx, query, streamQueryStats)
 }
 
 func (o *AdvancedSessionOperations) StreamRawQueryInto(query *RawDocumentQuery, output io.Writer) error {
 	return o.s.StreamRawQueryInto(query, output)
 }
+func (o *AdvancedSessionOperations) StreamRawQueryIntoContext(ctx context.Context, query *RawDocumentQuery, output io.Writer) error {
+	return o.s.StreamRawQueryIntoContext(ctx, query, output)
+}
 
 func (o *AdvancedSessionOperations) StreamQueryInto(query *DocumentQuery, output io.Writer) error {
 	return o.s.StreamQueryInto(query, output)
 }
+func (o *AdvancedSessionOperations) StreamQueryIntoContext(ctx context.Context, query *DocumentQuery, output io.Writer) error {
+	return o.s.StreamQueryIntoContext(ctx, query, output)
+}
 
 func (o *AdvancedSessionOperations) Exists(id string) (bool, error) {
 	return o.s.Exists(id)
+}
+func (o *AdvancedSessionOperations) ExistsContext(ctx context.Context, id string) (bool, error) {
+	return o.s.ExistsContext(ctx, id)
 }
 
 func (o *AdvancedSessionOperations) WhatChanged() (map[string][]*DocumentsChanges, error) {
@@ -210,13 +231,22 @@ func (o *AdvancedSessionOperations) RemoveBeforeQueryListener(handlerID int) {
 func (o *AdvancedSessionOperations) LoadStartingWith(results interface{}, args *StartsWithArgs) error {
 	return o.s.LoadStartingWith(results, args)
 }
+func (o *AdvancedSessionOperations) LoadStartingWithContext(ctx context.Context, results interface{}, args *StartsWithArgs) error {
+	return o.s.LoadStartingWithContext(ctx, results, args)
+}
 
 func (o *AdvancedSessionOperations) LoadStartingWithIntoStream(output io.Writer, args *StartsWithArgs) error {
 	return o.s.LoadStartingWithIntoStream(output, args)
 }
+func (o *AdvancedSessionOperations) LoadStartingWithIntoStreamContext(ctx context.Context, output io.Writer, args *StartsWithArgs) error {
+	return o.s.LoadStartingWithIntoStreamContext(ctx, output, args)
+}
 
 func (o *AdvancedSessionOperations) LoadIntoStream(ids []string, output io.Writer) error {
 	return o.s.LoadIntoStream(ids, output)
+}
+func (o *AdvancedSessionOperations) LoadIntoStreamContext(ctx context.Context, ids []string, output io.Writer) error {
+	return o.s.LoadIntoStreamContext(ctx, ids, output)
 }
 
 func (o *AdvancedSessionOperations) GetMaxNumberOfRequestsPerSession() int {

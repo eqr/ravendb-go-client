@@ -1,6 +1,7 @@
 package ravendb
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -341,7 +342,7 @@ func (re *RequestExecutor) updateClientConfigurationAsync() *completableFuture {
 		}()
 
 		command := NewGetClientConfigurationCommand()
-		currentIndexAndNode, err := re.chooseNodeForRequest(command, nil)
+		currentIndexAndNode, err := re.chooseNodeForRequest(context.Background(), command, nil)
 		if err != nil {
 			return
 		}
@@ -574,47 +575,53 @@ func (re *RequestExecutor) disposeAllFailedNodesTimers() {
 
 // sessionInfo can be nil
 func (re *RequestExecutor) ExecuteCommand(command RavenCommand, sessionInfo *SessionInfo) error {
+	return re.ExecuteCommandContext(context.Background(), command, sessionInfo)
+}
+
+// ExecuteCommandContext executes a command with caller-scoped cancellation.
+func (re *RequestExecutor) ExecuteCommandContext(ctx context.Context, command RavenCommand, sessionInfo *SessionInfo) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	redbg("RequestExector.ExecuteCommand: %T\n", command)
 	if re.isDisposed() {
-		// can happen if e.g. we create BulkInsertOperation, close the store and then call Close() on BulkInsertOperation
 		return newIllegalStateError("RequestExecutor has been disposed")
 	}
 	topologyUpdate := re.firstTopologyUpdateFuture
 	isDone := topologyUpdate != nil && topologyUpdate.IsDone() && !topologyUpdate.IsCompletedExceptionally() && !topologyUpdate.isCancelled()
 	if isDone || re.disableTopologyUpdates {
-		currentIndexAndNode, err := re.chooseNodeForRequest(command, sessionInfo)
+		currentIndexAndNode, err := re.chooseNodeForRequest(ctx, command, sessionInfo)
 		if err != nil {
 			return err
 		}
-		return re.Execute(currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, true, sessionInfo)
-	} else {
-		return re.unlikelyExecute(command, topologyUpdate, sessionInfo)
+		return re.ExecuteContext(ctx, currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, true, sessionInfo)
 	}
+	return re.unlikelyExecute(ctx, command, topologyUpdate, sessionInfo)
 }
 
-func (re *RequestExecutor) chooseNodeForRequest(cmd RavenCommand, sessionInfo *SessionInfo) (*CurrentIndexAndNode, error) {
+func (re *RequestExecutor) chooseNodeForRequest(ctx context.Context, cmd RavenCommand, sessionInfo *SessionInfo) (*CurrentIndexAndNode, error) {
 	if !cmd.GetBase().IsReadRequest {
-		return re.getPreferredNode()
+		return re.getPreferredNodeContext(ctx)
 	}
 
 	switch re.readBalanceBehavior {
 	case ReadBalanceBehaviorNone:
-		return re.getPreferredNode()
+		return re.getPreferredNodeContext(ctx)
 	case ReadBalanceBehaviorRoundRobin:
 		sessionID := 0
 		if sessionInfo != nil {
 			sessionID = sessionInfo.SessionID
 		}
-		return re.getNodeBySessionID(sessionID)
+		return re.getNodeBySessionIDContext(ctx, sessionID)
 	case ReadBalanceBehaviorFastestNode:
-		return re.getFastestNode()
+		return re.getFastestNodeContext(ctx)
 	default:
 		panicIf(true, "Unknown re.ReadBalanceBehavior: '%s'", re.readBalanceBehavior)
 	}
 	return nil, nil
 }
 
-func (re *RequestExecutor) unlikelyExecuteInner(command RavenCommand, topologyUpdate *completableFuture, sessionInfo *SessionInfo) (*completableFuture, error) {
+func (re *RequestExecutor) unlikelyExecuteInner(ctx context.Context, command RavenCommand, topologyUpdate *completableFuture, sessionInfo *SessionInfo) (*completableFuture, error) {
 
 	if topologyUpdate == nil {
 		re.mu.Lock()
@@ -630,28 +637,29 @@ func (re *RequestExecutor) unlikelyExecuteInner(command RavenCommand, topologyUp
 		re.mu.Unlock()
 	}
 
-	_, err := topologyUpdate.Get()
+	_, err := topologyUpdate.GetContext(ctx)
 	return topologyUpdate, err
 }
 
-func (re *RequestExecutor) unlikelyExecute(command RavenCommand, topologyUpdate *completableFuture, sessionInfo *SessionInfo) error {
+func (re *RequestExecutor) unlikelyExecute(ctx context.Context, command RavenCommand, topologyUpdate *completableFuture, sessionInfo *SessionInfo) error {
 	var err error
-	topologyUpdate, err = re.unlikelyExecuteInner(command, topologyUpdate, sessionInfo)
+	topologyUpdate, err = re.unlikelyExecuteInner(ctx, command, topologyUpdate, sessionInfo)
 	if err != nil {
-		re.mu.Lock()
-		if re.firstTopologyUpdateFuture == topologyUpdate {
-			re.firstTopologyUpdateFuture = nil // next request will raise it
+		if ctx.Err() == nil {
+			re.mu.Lock()
+			if re.firstTopologyUpdateFuture == topologyUpdate {
+				re.firstTopologyUpdateFuture = nil // next request will raise it
+			}
+			re.mu.Unlock()
 		}
-		re.mu.Unlock()
 		return err
 	}
 
-	currentIndexAndNode, err := re.chooseNodeForRequest(command, sessionInfo)
+	currentIndexAndNode, err := re.chooseNodeForRequest(ctx, command, sessionInfo)
 	if err != nil {
 		return err
 	}
-	err = re.Execute(currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, true, sessionInfo)
-	return err
+	return re.ExecuteContext(ctx, currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, true, sessionInfo)
 }
 
 func (re *RequestExecutor) updateTopologyCallback() {
@@ -796,12 +804,23 @@ func isNetworkTimeoutError(err error) bool {
 	return false
 }
 
-// Execute executes a command on a given node
-// If nodeIndex is -1, we don't know the index
+// Execute executes a command on a given node.
 func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, command RavenCommand, shouldRetry bool, sessionInfo *SessionInfo) error {
+	return re.ExecuteContext(context.Background(), chosenNode, nodeIndex, command, shouldRetry, sessionInfo)
+}
+
+// ExecuteContext executes a command using caller-scoped cancellation.
+func (re *RequestExecutor) ExecuteContext(ctx context.Context, chosenNode *ServerNode, nodeIndex int, command RavenCommand, shouldRetry bool, sessionInfo *SessionInfo) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	// nodeIndex -1 is equivalent to Java's null
 	request, err := re.createRequest(sessionInfo, chosenNode, command)
 	if err != nil {
+		return err
+	}
+	request = request.WithContext(ctx)
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	urlRef := request.URL.String()
@@ -816,6 +835,9 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 			if !expired &&
 				!cachedItem.getMightHaveBeenModified() &&
 				command.GetBase().CanCacheAggressively {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				return command.SetResponse(cachedValue, true)
 			}
 		}
@@ -833,16 +855,27 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 		request.Header.Set(headersTopologyEtag, etag)
 	}
 
-	//sp := time.Now()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var response *http.Response
+	var responseBodyTransferred bool
+	defer func() {
+		if response != nil && response.Body != nil && !responseBodyTransferred {
+			_ = response.Body.Close()
+		}
+	}()
 	re.NumberOfServerRequests.incrementAndGet()
 	if re.shouldExecuteOnAll(chosenNode, command) {
-		response, err = re.executeOnAllToFigureOutTheFastest(chosenNode, command)
+		response, err = re.executeOnAllToFigureOutTheFastest(ctx, chosenNode, command)
 	} else {
 		response, err = command.Send(re.httpClient, request)
 	}
 
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if !shouldRetry && isNetworkTimeoutError(err) {
 			return err
 		}
@@ -850,7 +883,7 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 		// but for us that propagates the wrong error to RequestExecutorTest_failsWhenServerIsOffline
 		urlRef = request.URL.String()
 		var ok bool
-		ok, err = re.handleServerDown(urlRef, chosenNode, nodeIndex, command, request, response, err, sessionInfo)
+		ok, err = re.handleServerDown(ctx, urlRef, chosenNode, nodeIndex, command, request, response, err, sessionInfo)
 		if err != nil {
 			return err
 		}
@@ -866,6 +899,9 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 	refreshClientConfiguration := httpExtensionsGetBooleanHeader(response, headersRefreshClientConfiguration)
 
 	if response.StatusCode == http.StatusNotModified {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		cachedItem.notModified()
 
 		if command.GetBase().ResponseType == RavenCommandResponseTypeObject {
@@ -876,7 +912,7 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 
 	var ok bool
 	if response.StatusCode >= 400 {
-		ok, err = re.handleUnsuccessfulResponse(chosenNode, nodeIndex, command, request, response, urlRef, sessionInfo, shouldRetry)
+		ok, err = re.handleUnsuccessfulResponse(ctx, chosenNode, nodeIndex, command, request, response, urlRef, sessionInfo, shouldRetry)
 		if err != nil {
 			return err
 		}
@@ -909,11 +945,10 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 	responseDispose, err = ravenCommand_processResponse(command, re.Cache, response, urlRef)
 	re.lastReturnedResponse.Store(time.Now())
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return err
-	}
-
-	if responseDispose == responseDisposeHandlingAutomatic {
-		_ = response.Body.Close()
 	}
 
 	if refreshTopology || refreshClientConfiguration {
@@ -936,15 +971,23 @@ func (re *RequestExecutor) Execute(chosenNode *ServerNode, nodeIndex int, comman
 		} else {
 			clientConfiguration = newCompletableFutureAlreadyCompleted(nil)
 		}
-		result := <-topologyTask
-		err1 := result.Err
-		_, err2 := clientConfiguration.Get()
+		var err1 error
+		select {
+		case result := <-topologyTask:
+			err1 = result.Err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		_, err2 := clientConfiguration.GetContext(ctx)
 		if err1 != nil {
 			return err1
 		}
 		if err2 != nil {
 			return err2
 		}
+	}
+	if responseDispose == responseDisposeHandlingManually {
+		responseBodyTransferred = true
 	}
 	return nil
 }
@@ -1003,12 +1046,13 @@ type responseAndError struct {
 	err      error
 }
 
-func (re *RequestExecutor) executeOnAllToFigureOutTheFastest(chosenNode *ServerNode, command RavenCommand) (*http.Response, error) {
+func (re *RequestExecutor) executeOnAllToFigureOutTheFastest(ctx context.Context, chosenNode *ServerNode, command RavenCommand) (*http.Response, error) {
 	// note: implementation is intentionally different than Java
 
 	var fastestWasRecorded int32 // atomic
-	chanPreferredResponse := make(chan *responseAndError, 1)
-
+	chanPreferredResponse := make(chan *responseAndError)
+	preferredResponseDone := make(chan struct{})
+	defer close(preferredResponseDone)
 	nPreferred := 0
 	nodes := re.getNodeSelector().getTopology().Nodes
 	for idx, node := range nodes {
@@ -1024,24 +1068,25 @@ func (re *RequestExecutor) executeOnAllToFigureOutTheFastest(chosenNode *ServerN
 			var response *http.Response
 			request, err := re.createRequest(nil, node, command)
 			if err == nil {
+				request = request.WithContext(ctx)
 				response, err = command.Send(re.httpClient, request)
 				n := atomic.AddInt32(&fastestWasRecorded, 1)
 				if n == 1 {
-					// this is the first one, so record as fastest
 					re.getNodeSelector().recordFastest(nodeIndex, node)
 				}
 			}
-			// we return http response of the preferred node and close
-			// all others
+			// The preferred response is caller-owned only after a receiver accepts it.
 			if isPreferred {
-				chanPreferredResponse <- &responseAndError{
-					response: response,
-					err:      err,
+				result := &responseAndError{response: response, err: err}
+				select {
+				case chanPreferredResponse <- result:
+				case <-preferredResponseDone:
+					if response != nil && response.Body != nil {
+						_ = response.Body.Close()
+					}
 				}
-			} else {
-				if response != nil && err == nil {
-					_ = response.Body.Close()
-				}
+			} else if response != nil && response.Body != nil {
+				_ = response.Body.Close()
 			}
 		}(idx, node)
 	}
@@ -1050,6 +1095,8 @@ func (re *RequestExecutor) executeOnAllToFigureOutTheFastest(chosenNode *ServerN
 	case ret := <-chanPreferredResponse:
 		// note: can be nil if there was an error
 		return ret.response, ret.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-time.After(time.Second * 15):
 		return nil, fmt.Errorf("request timed out")
 	}
@@ -1077,7 +1124,10 @@ func (re *RequestExecutor) createRequest(sessionInfo *SessionInfo, node *ServerN
 	return request, err
 }
 
-func (re *RequestExecutor) handleUnsuccessfulResponse(chosenNode *ServerNode, nodeIndex int, command RavenCommand, request *http.Request, response *http.Response, url string, sessionInfo *SessionInfo, shouldRetry bool) (bool, error) {
+func (re *RequestExecutor) handleUnsuccessfulResponse(ctx context.Context, chosenNode *ServerNode, nodeIndex int, command RavenCommand, request *http.Request, response *http.Response, url string, sessionInfo *SessionInfo, shouldRetry bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	var err error
 	switch response.StatusCode {
 	case http.StatusNotFound:
@@ -1101,21 +1151,26 @@ func (re *RequestExecutor) handleUnsuccessfulResponse(chosenNode *ServerNode, no
 		}
 
 		updateFuture := re.updateTopologyAsyncWithForceUpdate(chosenNode, int(math.MaxInt32), true)
-		result := <-updateFuture
+		var result *clusterUpdateAsyncResult
+		select {
+		case result = <-updateFuture:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
 		if result.Err != nil {
 			return false, result.Err
 		}
 
 		var currentIndexAndNode *CurrentIndexAndNode
-		currentIndexAndNode, err = re.chooseNodeForRequest(command, sessionInfo)
+		currentIndexAndNode, err = re.chooseNodeForRequest(ctx, command, sessionInfo)
 		if err != nil {
 			return false, err
 		}
-		err = re.Execute(currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, false, sessionInfo)
+		err = re.ExecuteContext(ctx, currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, false, sessionInfo)
 		return false, err
 	case http.StatusGatewayTimeout, http.StatusRequestTimeout,
 		http.StatusBadGateway, http.StatusServiceUnavailable:
-		ok, err := re.handleServerDown(url, chosenNode, nodeIndex, command, request, response, nil, sessionInfo)
+		ok, err := re.handleServerDown(ctx, url, chosenNode, nodeIndex, command, request, response, nil, sessionInfo)
 		return ok, err
 	case http.StatusConflict:
 		err = requestExecutorHandleConflict(response)
@@ -1130,7 +1185,10 @@ func requestExecutorHandleConflict(response *http.Response) error {
 	return exceptionDispatcherThrowError(response)
 }
 
-func (re *RequestExecutor) handleServerDown(url string, chosenNode *ServerNode, nodeIndex int, command RavenCommand, request *http.Request, response *http.Response, e error, sessionInfo *SessionInfo) (bool, error) {
+func (re *RequestExecutor) handleServerDown(ctx context.Context, url string, chosenNode *ServerNode, nodeIndex int, command RavenCommand, request *http.Request, response *http.Response, e error, sessionInfo *SessionInfo) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if command.GetBase().FailedNodes == nil {
 		command.GetBase().FailedNodes = map[*ServerNode]error{}
 	}
@@ -1151,7 +1209,7 @@ func (re *RequestExecutor) handleServerDown(url string, chosenNode *ServerNode, 
 
 	nodeSelector.onFailedRequest(nodeIndex)
 
-	currentIndexAndNode, err := re.getPreferredNode()
+	currentIndexAndNode, err := re.getPreferredNodeContext(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -1161,7 +1219,7 @@ func (re *RequestExecutor) handleServerDown(url string, chosenNode *ServerNode, 
 		return false, nil
 	}
 
-	err = re.Execute(currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, false, sessionInfo)
+	err = re.ExecuteContext(ctx, currentIndexAndNode.currentNode, currentIndexAndNode.currentIndex, command, false, sessionInfo)
 	if err != nil {
 		return false, err
 	}
@@ -1324,39 +1382,51 @@ func (re *RequestExecutor) createClient() (*http.Client, error) {
 }
 
 func (re *RequestExecutor) getPreferredNode() (*CurrentIndexAndNode, error) {
-	ns, err := re.ensureNodeSelector()
+	return re.getPreferredNodeContext(context.Background())
+}
+
+func (re *RequestExecutor) getPreferredNodeContext(ctx context.Context) (*CurrentIndexAndNode, error) {
+	ns, err := re.ensureNodeSelectorContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	return ns.getPreferredNode()
 }
 
 func (re *RequestExecutor) getNodeBySessionID(sessionID int) (*CurrentIndexAndNode, error) {
-	ns, err := re.ensureNodeSelector()
+	return re.getNodeBySessionIDContext(context.Background(), sessionID)
+}
+
+func (re *RequestExecutor) getNodeBySessionIDContext(ctx context.Context, sessionID int) (*CurrentIndexAndNode, error) {
+	ns, err := re.ensureNodeSelectorContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	return ns.getNodeBySessionID(sessionID)
 }
 
 func (re *RequestExecutor) getFastestNode() (*CurrentIndexAndNode, error) {
-	ns, err := re.ensureNodeSelector()
+	return re.getFastestNodeContext(context.Background())
+}
+
+func (re *RequestExecutor) getFastestNodeContext(ctx context.Context) (*CurrentIndexAndNode, error) {
+	ns, err := re.ensureNodeSelectorContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	return ns.getFastestNode()
 }
 
-func (re *RequestExecutor) ensureNodeSelector() (*NodeSelector, error) {
+func (re *RequestExecutor) ensureNodeSelectorContext(ctx context.Context) (*NodeSelector, error) {
+	if err := validateContext(ctx); err != nil {
+		return nil, err
+	}
 	re.mu.Lock()
 	firstTopologyUpdate := re.firstTopologyUpdateFuture
 	re.mu.Unlock()
 
 	if firstTopologyUpdate != nil && (!firstTopologyUpdate.IsDone() || firstTopologyUpdate.IsCompletedExceptionally()) {
-		_, err := firstTopologyUpdate.Get()
+		_, err := firstTopologyUpdate.GetContext(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1368,7 +1438,6 @@ func (re *RequestExecutor) ensureNodeSelector() (*NodeSelector, error) {
 			Nodes: re.GetTopologyNodes(),
 			Etag:  re.TopologyEtag,
 		}
-
 		nodeSelector = NewNodeSelector(topology)
 		re.setNodeSelector(nodeSelector)
 	}
