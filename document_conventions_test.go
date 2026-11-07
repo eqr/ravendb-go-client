@@ -12,6 +12,10 @@ type User struct {
 	Name string
 }
 
+func TestNewDocumentConventionsDefaultsToRoundRobinReads(t *testing.T) {
+	assert.Equal(t, ReadBalanceBehaviorRoundRobin, NewDocumentConventions().ReadBalanceBehavior)
+}
+
 func TestDefaultGetCollectionName(t *testing.T) {
 	name := getCollectionNameForTypeOrEntity(&User{})
 	assert.Equal(t, "Users", name)

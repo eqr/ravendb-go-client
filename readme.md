@@ -43,6 +43,8 @@ func getDocumentStore(databaseName string) (*ravendb.DocumentStore, error) {
 }
 ```
 
+With multiple server URLs, the client shuffles their order when bootstrapping topology. Reads use round-robin session assignment by default; writes still use the preferred healthy node. Override `store.GetConventions().ReadBalanceBehavior` to choose another read policy.
+
 To setup an document store with security, you'll need to provide the client certificate for authentication. 
 Here is how to setup a document store with a certificate:
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -689,8 +690,18 @@ type tupleStringError struct {
 	Err error
 }
 
+func shuffleURLs(urls []string, seed int64) []string {
+	shuffled := append([]string(nil), urls...)
+	random := rand.New(rand.NewSource(seed))
+	random.Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+	return shuffled
+}
+
 func (re *RequestExecutor) firstTopologyUpdate(inputUrls []string) *completableFuture {
 	initialUrls := requestExecutorValidateUrls(inputUrls, re.Certificate)
+	initialUrls = shuffleURLs(initialUrls, time.Now().UnixNano())
 
 	future := newCompletableFuture()
 	var list []*tupleStringError

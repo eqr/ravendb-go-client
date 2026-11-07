@@ -61,7 +61,7 @@ func getDefaultConventions() *DocumentConventions {
 // NewDocumentConventions creates DocumentConventions with default values
 func NewDocumentConventions() *DocumentConventions {
 	return &DocumentConventions{
-		ReadBalanceBehavior:                            ReadBalanceBehaviorNone,
+		ReadBalanceBehavior:                            ReadBalanceBehaviorRoundRobin,
 		MaxLengthOfQueryUsingGetURL:                    1024 + 512,
 		IdentityPartsSeparator:                         "/",
 		disableTopologyUpdates:                         false,
