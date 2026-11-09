@@ -287,3 +287,30 @@ func TestParseScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyOrderChangesAreNotSourceChanges(t *testing.T) {
+	pb := fakePocketBaseFunc(t, func(name string, request int64) ([]fakeItem, bool) {
+		value := json.RawMessage(`{"a":1,"b":{"x":9007199254740993,"y":2}}`)
+		if request%2 == 0 {
+			value = json.RawMessage(`{"b":{"y":2,"x":9007199254740993},"a":1}`)
+		}
+		return []fakeItem{{ID: "a1", Key: "k", AppName: "guide", Value: value}}, name == "kv"
+	})
+	identity, password := credentialFiles(t)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{
+		"-mode", "dry-run", "-source-url", pb.URL,
+		"-source-identity-file", identity, "-source-password-file", password,
+		"-scopes", "kv:guide",
+	}, &out)
+	if err != nil {
+		t.Fatalf("reordered keys reported as a change: %v", err)
+	}
+}
+
+func TestCanonicalJSONKeepsExactNumbers(t *testing.T) {
+	got, err := canonicalJSON([]byte(`{"b":1.50,"a":9007199254740993}`))
+	if err != nil || string(got) != `{"a":9007199254740993,"b":1.50}` {
+		t.Fatalf("got %s err %v", got, err)
+	}
+}

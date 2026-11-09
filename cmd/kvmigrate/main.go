@@ -349,6 +349,11 @@ func (p *pocketBase) records(ctx context.Context, sc scope) ([]record, []json.Ra
 			return nil, nil, fmt.Errorf("read %s: source changed during paging", collection)
 		}
 		for _, item := range payload.Items {
+			// PocketBase does not keep JSON key order stable between responses.
+			item, err := canonicalJSON(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read %s: decode record: %w", collection, err)
+			}
 			var fields struct {
 				ID      string          `json:"id"`
 				Key     string          `json:"key"`
@@ -502,6 +507,15 @@ func sameJSON(a, b []byte) (bool, error) {
 		return false, err
 	}
 	return reflect.DeepEqual(left, right), nil
+}
+
+// canonicalJSON re-encodes data with sorted object keys and exact numbers.
+func canonicalJSON(data []byte) (json.RawMessage, error) {
+	var v any
+	if err := decodeNumbers(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 func decodeNumbers(data []byte, out *any) error {
