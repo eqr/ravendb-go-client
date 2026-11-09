@@ -57,6 +57,20 @@ func fakePocketBaseFunc(t *testing.T, load func(name string, request int64) ([]f
 			http.NotFound(w, r)
 			return
 		}
+		if filter := r.URL.Query().Get("filter"); filter != "" {
+			app, err := strconv.Unquote(strings.TrimPrefix(filter, "appname = "))
+			if err != nil {
+				http.Error(w, `{"message":"bad filter"}`, http.StatusBadRequest)
+				return
+			}
+			var kept []fakeItem
+			for _, item := range items {
+				if item.AppName == app {
+					kept = append(kept, item)
+				}
+			}
+			items = kept
+		}
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		perPage, _ := strconv.Atoi(r.URL.Query().Get("perPage"))
 		start := min((page-1)*perPage, len(items))
@@ -101,7 +115,7 @@ func TestDryRunReportsCounts(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-mode", "dry-run", "-source-url", pb.URL,
 		"-source-identity-file", identity, "-source-password-file", password,
-		"-collections", "kv,library_kv",
+		"-scopes", "kv:guide,library_kv:",
 	}, &out)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +141,7 @@ func TestDryRunFailsOnAppNameCaseCollision(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-mode", "dry-run", "-source-url", pb.URL,
 		"-source-identity-file", identity, "-source-password-file", password,
-		"-collections", "kv",
+		"-scopes", "kv:Guide,kv:guide",
 	}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "collisions") {
 		t.Fatalf("got %v, want collision error", err)
@@ -142,7 +156,7 @@ func TestRejectsUnprotectedCredentialFile(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-mode", "dry-run", "-source-url", "http://unused",
 		"-source-identity-file", identity, "-source-password-file", password,
-		"-collections", "kv",
+		"-scopes", "kv:guide",
 	}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "readable only by its owner") {
 		t.Fatalf("got %v", err)
@@ -154,6 +168,7 @@ func TestImportAndVerify(t *testing.T) {
 		"kv": {
 			{Key: "global_settings", AppName: "guide", Value: json.RawMessage(`{"model":"x","limits":[1,2]}`)},
 			{Key: "tg_user", AppName: "guide", Value: json.RawMessage(`9007199254740993`)},
+			{Key: "session", AppName: "telegram", Value: json.RawMessage(`"not in scope"`)},
 		},
 		"mapper_db": {
 			{Key: "google_token", AppName: "credentials", Value: json.RawMessage(`"abc"`)},
@@ -167,7 +182,7 @@ func TestImportAndVerify(t *testing.T) {
 		return []string{
 			"-mode", mode, "-source-url", pb.URL,
 			"-source-identity-file", identity, "-source-password-file", password,
-			"-collections", "kv,mapper_db,library_kv",
+			"-scopes", "kv:guide,mapper_db:credentials,mapper_db:restaurant,library_kv:",
 			"-confirm-source-writers-stopped",
 			"-ravendb-urls", url, "-ravendb-database", "kvmigrate",
 		}
@@ -194,6 +209,9 @@ func TestImportAndVerify(t *testing.T) {
 	}
 
 	docs := ravtest.Open(t, url, "kvmigrate")
+	if exists, err := ravenkv.NewStore(docs, "kv", "telegram").Exists(ctx, "session"); err != nil || exists {
+		t.Fatalf("telegram row imported outside scope: exists=%v err=%v", exists, err)
+	}
 	userID, err := ravenkv.NewTypedStore[int64](docs, "kv", "guide").Get(ctx, "tg_user")
 	if err != nil || userID != 9007199254740993 {
 		t.Fatalf("tg_user=%d err=%v", userID, err)
@@ -214,7 +232,7 @@ func TestImportRequiresWriterFence(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-mode", "import", "-source-url", "http://unused",
 		"-source-identity-file", identity, "-source-password-file", password,
-		"-collections", "kv", "-ravendb-urls", "http://unused", "-ravendb-database", "kv-shared",
+		"-scopes", "kv:guide", "-ravendb-urls", "http://unused", "-ravendb-database", "kv-shared",
 	}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "-confirm-source-writers-stopped") {
 		t.Fatalf("got %v", err)
@@ -233,9 +251,36 @@ func TestFailsWhenSourceChangesBetweenReads(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-mode", "dry-run", "-source-url", pb.URL,
 		"-source-identity-file", identity, "-source-password-file", password,
-		"-collections", "kv",
+		"-scopes", "kv:guide",
 	}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "source changed") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestEmptyAppScopeRejectsNamedAppRows(t *testing.T) {
+	pb := fakePocketBase(t, map[string][]fakeItem{
+		"kv": {{Key: "k", AppName: "guide", Value: json.RawMessage(`1`)}},
+	})
+	identity, password := credentialFiles(t)
+	err := run(context.Background(), []string{
+		"-mode", "dry-run", "-source-url", pb.URL,
+		"-source-identity-file", identity, "-source-password-file", password,
+		"-scopes", "kv:",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `belongs to appname "guide"`) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParseScopes(t *testing.T) {
+	scopes, err := parseScopes("kv:guide, library_kv:")
+	if err != nil || len(scopes) != 2 || scopes[1] != (scope{Collection: "library_kv"}) {
+		t.Fatalf("scopes %+v err %v", scopes, err)
+	}
+	for _, bad := range []string{"kv", ":guide", "kv:a/b", "kv:guide,kv:guide", `kv:"x"`} {
+		if _, err := parseScopes(bad); err == nil {
+			t.Fatalf("%q: want error", bad)
+		}
 	}
 }

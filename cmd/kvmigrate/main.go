@@ -34,12 +34,17 @@ type config struct {
 	sourceURL          string
 	sourceIdentityFile string
 	sourcePasswordFile string
-	collections        []string
+	scopes             []scope
 	ravenURLs          []string
 	ravenDatabase      string
 	ravenCertificate   string
 	ravenPrivateKey    string
 	ravenCAFile        string
+}
+
+type scope struct {
+	Collection string
+	AppName    string
 }
 
 type record struct {
@@ -87,11 +92,11 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err := source.authenticate(ctx, identity, password); err != nil {
 		return err
 	}
-	records, fingerprint, err := source.snapshot(ctx, cfg.collections)
+	records, fingerprint, err := source.snapshot(ctx, cfg.scopes)
 	if err != nil {
 		return err
 	}
-	if err := source.unchanged(ctx, cfg.collections, fingerprint); err != nil {
+	if err := source.unchanged(ctx, cfg.scopes, fingerprint); err != nil {
 		return err
 	}
 	if err := checkCollisions(records); err != nil {
@@ -116,13 +121,13 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 			}
 			rep.Written++
 		}
-		if err := source.unchanged(ctx, cfg.collections, fingerprint); err != nil {
+		if err := source.unchanged(ctx, cfg.scopes, fingerprint); err != nil {
 			return fmt.Errorf("after import: %w", err)
 		}
 		return json.NewEncoder(output).Encode(rep)
 	}
 
-	if err := verify(ctx, docs, records, &rep); err != nil {
+	if err := verify(ctx, docs, cfg.scopes, records, &rep); err != nil {
 		return err
 	}
 	if err := json.NewEncoder(output).Encode(rep); err != nil {
@@ -142,7 +147,7 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	sourceURL := flags.String("source-url", "", "PocketBase base URL")
 	sourceIdentity := flags.String("source-identity-file", "", "protected file with the PocketBase app user email (PB_EMAIL)")
 	sourcePassword := flags.String("source-password-file", "", "protected file with the PocketBase app user password (PB_PASSWORD)")
-	collections := flags.String("collections", "", "comma-separated PocketBase KV collections")
+	scopesValue := flags.String("scopes", "", "comma-separated collection:app pairs, e.g. kv:guide,library_kv: (empty app after the colon)")
 	ravenURLs := flags.String("ravendb-urls", "", "comma-separated RavenDB node URLs")
 	ravenDatabase := flags.String("ravendb-database", "", "existing RavenDB database")
 	ravenCertificate := flags.String("ravendb-certificate-file", "", "RavenDB client certificate")
@@ -162,7 +167,6 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 		sourceURL:          *sourceURL,
 		sourceIdentityFile: *sourceIdentity,
 		sourcePasswordFile: *sourcePassword,
-		collections:        split(*collections),
 		ravenURLs:          split(*ravenURLs),
 		ravenDatabase:      *ravenDatabase,
 		ravenCertificate:   *ravenCertificate,
@@ -172,11 +176,16 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	if flags.NArg() != 0 {
 		return nil, errors.New("unexpected positional arguments")
 	}
+	scopes, err := parseScopes(*scopesValue)
+	if err != nil {
+		return nil, err
+	}
+	cfg.scopes = scopes
 	if cfg.mode != "dry-run" && cfg.mode != "import" && cfg.mode != "verify" {
 		return nil, errors.New("-mode must be dry-run, import, or verify")
 	}
-	if cfg.sourceURL == "" || cfg.sourceIdentityFile == "" || cfg.sourcePasswordFile == "" || len(cfg.collections) == 0 {
-		return nil, errors.New("-source-url, -source-identity-file, -source-password-file and -collections are required")
+	if cfg.sourceURL == "" || cfg.sourceIdentityFile == "" || cfg.sourcePasswordFile == "" || len(cfg.scopes) == 0 {
+		return nil, errors.New("-source-url, -source-identity-file, -source-password-file and -scopes are required")
 	}
 	if cfg.mode == "dry-run" {
 		return cfg, nil
@@ -217,17 +226,17 @@ func (p *pocketBase) authenticate(ctx context.Context, identity, password string
 	return nil
 }
 
-// snapshot reads all collections and returns their records with a hash of the raw source data.
-func (p *pocketBase) snapshot(ctx context.Context, collections []string) ([]record, string, error) {
+// snapshot reads all scopes and returns their records with a hash of the raw source data.
+func (p *pocketBase) snapshot(ctx context.Context, scopes []scope) ([]record, string, error) {
 	var all []record
 	hash := sha256.New()
-	for _, collection := range collections {
-		records, raw, err := p.records(ctx, collection)
+	for _, sc := range scopes {
+		records, raw, err := p.records(ctx, sc)
 		if err != nil {
 			return nil, "", err
 		}
 		all = append(all, records...)
-		fmt.Fprintf(hash, "%q\n", collection)
+		fmt.Fprintf(hash, "%q %q\n", sc.Collection, sc.AppName)
 		for _, item := range raw {
 			hash.Write(item)
 			hash.Write([]byte("\n"))
@@ -236,8 +245,8 @@ func (p *pocketBase) snapshot(ctx context.Context, collections []string) ([]reco
 	return all, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func (p *pocketBase) unchanged(ctx context.Context, collections []string, fingerprint string) error {
-	_, again, err := p.snapshot(ctx, collections)
+func (p *pocketBase) unchanged(ctx context.Context, scopes []scope, fingerprint string) error {
+	_, again, err := p.snapshot(ctx, scopes)
 	if err != nil {
 		return err
 	}
@@ -247,7 +256,10 @@ func (p *pocketBase) unchanged(ctx context.Context, collections []string, finger
 	return nil
 }
 
-func (p *pocketBase) records(ctx context.Context, collection string) ([]record, []json.RawMessage, error) {
+// records reads one app's rows of a collection. An empty app reads the whole
+// collection, which must then have no rows for any named app.
+func (p *pocketBase) records(ctx context.Context, sc scope) ([]record, []json.RawMessage, error) {
+	collection := sc.Collection
 	var out []record
 	var raw []json.RawMessage
 	totalItems := -1
@@ -258,6 +270,9 @@ func (p *pocketBase) records(ctx context.Context, collection string) ([]record, 
 		params.Set("perPage", strconv.Itoa(sourcePageSize))
 		params.Set("sort", "+id")
 		params.Set("fields", "id,key,appname,value")
+		if sc.AppName != "" {
+			params.Set("filter", "appname = "+strconv.Quote(sc.AppName))
+		}
 		var payload struct {
 			Page       int               `json:"page"`
 			TotalItems int               `json:"totalItems"`
@@ -297,7 +312,10 @@ func (p *pocketBase) records(ctx context.Context, collection string) ([]record, 
 			if len(value) == 0 {
 				value = json.RawMessage("null")
 			}
-			out = append(out, record{Collection: collection, AppName: strings.TrimSpace(fields.AppName), Key: key, Value: value})
+			if appName := strings.TrimSpace(fields.AppName); appName != sc.AppName {
+				return nil, nil, fmt.Errorf("read %s: record %s belongs to appname %q, not %q; name it in -scopes", collection, fields.ID, appName, sc.AppName)
+			}
+			out = append(out, record{Collection: collection, AppName: sc.AppName, Key: key, Value: value})
 			raw = append(raw, item)
 		}
 		if len(payload.Items) < sourcePageSize || len(out) >= totalItems {
@@ -370,15 +388,17 @@ func countRecords(records []record) map[string]map[string]int {
 	return counts
 }
 
-func verify(ctx context.Context, docs *ravendb.DocumentStore, records []record, rep *report) error {
-	type scope struct{ collection, appName string }
+func verify(ctx context.Context, docs *ravendb.DocumentStore, scopes []scope, records []record, rep *report) error {
 	expected := map[scope]map[string]bool{}
+	for _, sc := range scopes {
+		expected[sc] = map[string]bool{}
+	}
 	for _, r := range records {
-		s := scope{r.Collection, r.AppName}
-		if expected[s] == nil {
-			expected[s] = map[string]bool{}
+		sc := scope{Collection: r.Collection, AppName: r.AppName}
+		if expected[sc] == nil {
+			expected[sc] = map[string]bool{}
 		}
-		expected[s][r.Key] = true
+		expected[sc][r.Key] = true
 
 		store := ravenkv.NewStore(docs, r.Collection, r.AppName)
 		got, err := store.Get(ctx, r.Key)
@@ -399,11 +419,11 @@ func verify(ctx context.Context, docs *ravendb.DocumentStore, records []record, 
 		}
 		rep.Verified++
 	}
-	for s, keys := range expected {
-		store := ravenkv.NewStore(docs, s.collection, s.appName)
+	for sc, keys := range expected {
+		store := ravenkv.NewStore(docs, sc.Collection, sc.AppName)
 		stored, err := store.List(ctx, "")
 		if err != nil {
-			return fmt.Errorf("list %s/%s: %w", s.collection, s.appName, err)
+			return fmt.Errorf("list %s/%s: %w", sc.Collection, sc.AppName, err)
 		}
 		for _, key := range stored {
 			if !keys[key] {
@@ -476,6 +496,25 @@ func readProtected(path string) (string, error) {
 		return "", fmt.Errorf("%s: empty", path)
 	}
 	return value, nil
+}
+
+func parseScopes(value string) ([]scope, error) {
+	var scopes []scope
+	seen := map[scope]bool{}
+	for _, item := range split(value) {
+		collection, app, ok := strings.Cut(item, ":")
+		collection, app = strings.TrimSpace(collection), strings.TrimSpace(app)
+		if !ok || collection == "" || strings.ContainsAny(collection+app, "/\"'") {
+			return nil, fmt.Errorf("invalid scope %q: want collection:app", item)
+		}
+		sc := scope{Collection: collection, AppName: app}
+		if seen[sc] {
+			return nil, fmt.Errorf("duplicate scope %q", item)
+		}
+		seen[sc] = true
+		scopes = append(scopes, sc)
+	}
+	return scopes, nil
 }
 
 func split(value string) []string {

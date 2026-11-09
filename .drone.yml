@@ -8,6 +8,8 @@ name: kv-migrate
 # with stale PocketBase data.
 # Uses the runtime pair (drone_user): kv-shared grants it Read/Write and has no
 # indexes, so the Admin pair is not needed.
+# KV_SCOPES lists only the app being cut over now. Never list an app that already
+# writes to RavenDB.
 trigger:
   branch:
     - master
@@ -21,7 +23,7 @@ steps:
       GOPATH: /home/eqr/drone/go
       GOMODCACHE: /home/eqr/drone/go/pkg.mod
       GOCACHE: /home/eqr/drone/go/build
-      KV_COLLECTIONS: kv,mapper_db,library_kv
+      KV_SCOPES: kv:guide
       RAVEN_URLS: https://a.eqr-home.ravendb.community:8443
       RAVEN_DATABASE: kv-shared
       SOURCE_URL:
@@ -51,7 +53,7 @@ steps:
         -source-url "$${SOURCE_URL:?SOURCE_URL is required}"
         -source-identity-file "$$SECRETS/pb-identity"
         -source-password-file "$$SECRETS/pb-password"
-        -collections "$$KV_COLLECTIONS"
+        -scopes "$$KV_SCOPES"
         -confirm-source-writers-stopped
         -ravendb-urls "$$RAVEN_URLS"
         -ravendb-database "$$RAVEN_DATABASE"
