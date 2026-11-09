@@ -41,7 +41,7 @@ steps:
       - set +x
       - umask 077
       - SECRETS=$(mktemp -d)
-      - trap 'rm -rf "$$SECRETS"' EXIT
+      - trap 'cd "$$SECRETS" && rm -f pb-identity pb-password raven-cert.pem raven-key.pem kvmigrate && cd / && rmdir "$$SECRETS"' EXIT
       - printf '%s' "$${PB_IDENTITY:?PB_IDENTITY is required}" > "$$SECRETS/pb-identity"
       - printf '%s' "$${PB_PASSWORD:?PB_PASSWORD is required}" > "$$SECRETS/pb-password"
       - printf '%s' "$${RAVEN_RUNTIME_CERT:?RAVEN_RUNTIME_CERT is required}" > "$$SECRETS/raven-cert.pem"
