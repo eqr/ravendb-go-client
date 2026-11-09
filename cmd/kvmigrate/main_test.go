@@ -253,8 +253,11 @@ func TestFailsWhenSourceChangesBetweenReads(t *testing.T) {
 		"-source-identity-file", identity, "-source-password-file", password,
 		"-scopes", "kv:guide",
 	}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "source changed") {
+	if err == nil || !strings.Contains(err.Error(), "source changed") || !strings.Contains(err.Error(), `changed kv/a1 key "k" fields value`) {
 		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "2") {
+		t.Fatalf("error leaks a value: %v", err)
 	}
 }
 

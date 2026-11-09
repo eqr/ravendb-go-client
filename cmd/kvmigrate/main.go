@@ -48,6 +48,8 @@ type scope struct {
 }
 
 type record struct {
+	ID         string
+	Raw        json.RawMessage
 	Collection string
 	AppName    string
 	Key        string
@@ -96,7 +98,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := source.unchanged(ctx, cfg.scopes, fingerprint); err != nil {
+	if err := source.unchanged(ctx, cfg.scopes, fingerprint, records); err != nil {
 		return err
 	}
 	if err := checkCollisions(records); err != nil {
@@ -121,7 +123,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 			}
 			rep.Written++
 		}
-		if err := source.unchanged(ctx, cfg.scopes, fingerprint); err != nil {
+		if err := source.unchanged(ctx, cfg.scopes, fingerprint, records); err != nil {
 			return fmt.Errorf("after import: %w", err)
 		}
 		return json.NewEncoder(output).Encode(rep)
@@ -245,15 +247,71 @@ func (p *pocketBase) snapshot(ctx context.Context, scopes []scope) ([]record, st
 	return all, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func (p *pocketBase) unchanged(ctx context.Context, scopes []scope, fingerprint string) error {
-	_, again, err := p.snapshot(ctx, scopes)
+func (p *pocketBase) unchanged(ctx context.Context, scopes []scope, fingerprint string, before []record) error {
+	after, again, err := p.snapshot(ctx, scopes)
 	if err != nil {
 		return err
 	}
 	if again != fingerprint {
-		return errors.New("source changed during migration; stop all writers and run again")
+		return fmt.Errorf("source changed during migration; stop all writers and run again. Changed records (no values shown):\n  %s",
+			strings.Join(describeChanges(before, after), "\n  "))
 	}
 	return nil
+}
+
+// describeChanges lists records that differ between two reads by PocketBase
+// record ID, naming changed fields but never values.
+func describeChanges(before, after []record) []string {
+	const limit = 20
+	old := map[string]record{}
+	for _, r := range before {
+		old[r.Collection+"/"+r.ID] = r
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range after {
+		id := r.Collection + "/" + r.ID
+		seen[id] = true
+		prev, ok := old[id]
+		switch {
+		case !ok:
+			out = append(out, fmt.Sprintf("added %s key %q", id, r.Key))
+		case !bytes.Equal(prev.Raw, r.Raw):
+			out = append(out, fmt.Sprintf("changed %s key %q fields %s", id, r.Key, strings.Join(changedFields(prev.Raw, r.Raw), ",")))
+		}
+	}
+	for _, r := range before {
+		if id := r.Collection + "/" + r.ID; !seen[id] {
+			out = append(out, fmt.Sprintf("removed %s key %q", id, r.Key))
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, "none by record; order or paging differed")
+	}
+	if len(out) > limit {
+		out = append(out[:limit], fmt.Sprintf("... and %d more", len(out)-limit))
+	}
+	return out
+}
+
+func changedFields(a, b json.RawMessage) []string {
+	var left, right map[string]json.RawMessage
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return []string{"?"}
+	}
+	var names []string
+	for name, value := range right {
+		if !bytes.Equal(left[name], value) {
+			names = append(names, name)
+		}
+	}
+	for name := range left {
+		if _, ok := right[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // records reads one app's rows of a collection. An empty app reads the whole
@@ -315,7 +373,7 @@ func (p *pocketBase) records(ctx context.Context, sc scope) ([]record, []json.Ra
 			if appName := strings.TrimSpace(fields.AppName); appName != sc.AppName {
 				return nil, nil, fmt.Errorf("read %s: record %s belongs to appname %q, not %q; name it in -scopes", collection, fields.ID, appName, sc.AppName)
 			}
-			out = append(out, record{Collection: collection, AppName: sc.AppName, Key: key, Value: value})
+			out = append(out, record{ID: fields.ID, Raw: item, Collection: collection, AppName: sc.AppName, Key: key, Value: value})
 			raw = append(raw, item)
 		}
 		if len(payload.Items) < sourcePageSize || len(out) >= totalItems {
