@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/eqr/ravendb-go-client/internal/ravtest"
-	"github.com/eqr/ravendb-go-client/kv"
+	"github.com/eqr/ravendb-go-client/ravenkv"
 )
 
 type fakeItem struct {
@@ -115,11 +115,12 @@ func TestDryRunReportsCounts(t *testing.T) {
 	}
 }
 
-func TestDryRunFailsOnCaseCollision(t *testing.T) {
+func TestDryRunFailsOnAppNameCaseCollision(t *testing.T) {
 	pb := fakePocketBase(t, map[string][]fakeItem{
 		"kv": {
-			{Key: "Token", AppName: "guide", Value: json.RawMessage(`1`)},
+			{Key: "token", AppName: "Guide", Value: json.RawMessage(`1`)},
 			{Key: "token", AppName: "guide", Value: json.RawMessage(`2`)},
+			{Key: "Token", AppName: "guide", Value: json.RawMessage(`3`)},
 		},
 	})
 	identity, password := credentialFiles(t)
@@ -193,17 +194,17 @@ func TestImportAndVerify(t *testing.T) {
 	}
 
 	docs := ravtest.Open(t, url, "kvmigrate")
-	userID, err := kv.NewTypedStore[int64](docs, "kv", "guide").Get(ctx, "tg_user")
+	userID, err := ravenkv.NewTypedStore[int64](docs, "kv", "guide").Get(ctx, "tg_user")
 	if err != nil || userID != 9007199254740993 {
 		t.Fatalf("tg_user=%d err=%v", userID, err)
 	}
 
-	if err := kv.NewStore(docs, "mapper_db", "restaurant").Set(ctx, "stray", 1); err != nil {
+	if err := ravenkv.NewStore(docs, "mapper_db", "restaurant").Set(ctx, "stray", 1); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
 	err = run(ctx, args("verify"), &out)
-	if err == nil || !strings.Contains(out.String(), "mapper_db/restaurant/stray") {
+	if err == nil || !strings.Contains(out.String(), ravenkv.NewStore(nil, "mapper_db", "restaurant").DocumentID("stray")) {
 		t.Fatalf("verify should report extra key: err=%v out=%s", err, out.String())
 	}
 }

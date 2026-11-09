@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/eqr/ravendb-go-client"
-	"github.com/eqr/ravendb-go-client/kv"
+	"github.com/eqr/ravendb-go-client/ravenkv"
 )
 
 const sourcePageSize = 500
@@ -111,7 +111,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 
 	if cfg.mode == "import" {
 		for _, r := range records {
-			if err := kv.NewStore(docs, r.Collection, r.AppName).Set(ctx, r.Key, r.Value); err != nil {
+			if err := ravenkv.NewStore(docs, r.Collection, r.AppName).Set(ctx, r.Key, r.Value); err != nil {
 				return fmt.Errorf("write %s/%s/%s: %w", r.Collection, r.AppName, r.Key, err)
 			}
 			rep.Written++
@@ -335,15 +335,19 @@ func (p *pocketBase) do(ctx context.Context, method, path string, body io.Reader
 }
 
 // checkCollisions fails when two records map to the same case-insensitive RavenDB ID.
+// Keys are hex-encoded, so only app names that differ by case can collide.
 func checkCollisions(records []record) error {
 	seen := map[string]record{}
 	var collisions []string
 	for _, r := range records {
-		id := kv.NewStore(nil, r.Collection, r.AppName).DocumentID(r.Key)
+		if strings.Contains(r.AppName, "/") {
+			return fmt.Errorf("collection %q: appname %q contains \"/\"", r.Collection, r.AppName)
+		}
+		id := ravenkv.NewStore(nil, r.Collection, r.AppName).DocumentID(r.Key)
 		folded := strings.ToLower(id)
 		if prev, ok := seen[folded]; ok {
 			collisions = append(collisions, fmt.Sprintf("%q (collection %q, appname %q, key %q) and %q (collection %q, appname %q, key %q)",
-				kv.NewStore(nil, prev.Collection, prev.AppName).DocumentID(prev.Key), prev.Collection, prev.AppName, prev.Key,
+				ravenkv.NewStore(nil, prev.Collection, prev.AppName).DocumentID(prev.Key), prev.Collection, prev.AppName, prev.Key,
 				id, r.Collection, r.AppName, r.Key))
 			continue
 		}
@@ -374,11 +378,11 @@ func verify(ctx context.Context, docs *ravendb.DocumentStore, records []record, 
 		if expected[s] == nil {
 			expected[s] = map[string]bool{}
 		}
-		expected[s][strings.ToLower(r.Key)] = true
+		expected[s][r.Key] = true
 
-		store := kv.NewStore(docs, r.Collection, r.AppName)
+		store := ravenkv.NewStore(docs, r.Collection, r.AppName)
 		got, err := store.Get(ctx, r.Key)
-		if errors.Is(err, kv.ErrNotFound) {
+		if errors.Is(err, ravenkv.ErrNotFound) {
 			rep.Missing = append(rep.Missing, store.DocumentID(r.Key))
 			continue
 		}
@@ -396,13 +400,13 @@ func verify(ctx context.Context, docs *ravendb.DocumentStore, records []record, 
 		rep.Verified++
 	}
 	for s, keys := range expected {
-		store := kv.NewStore(docs, s.collection, s.appName)
+		store := ravenkv.NewStore(docs, s.collection, s.appName)
 		stored, err := store.List(ctx, "")
 		if err != nil {
 			return fmt.Errorf("list %s/%s: %w", s.collection, s.appName, err)
 		}
 		for _, key := range stored {
-			if !keys[strings.ToLower(key)] {
+			if !keys[key] {
 				rep.Extra = append(rep.Extra, store.DocumentID(key))
 			}
 		}

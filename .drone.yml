@@ -6,6 +6,8 @@ name: kv-migrate
 # Manual only: start a custom build of master in Drone after stopping every app
 # that writes the KV collections. A rerun after cutover would overwrite RavenDB
 # with stale PocketBase data.
+# Uses the runtime pair (drone_user): kv-shared grants it Read/Write and has no
+# indexes, so the Admin pair is not needed.
 trigger:
   branch:
     - master
@@ -28,10 +30,10 @@ steps:
         from_secret: PB_EMAIL
       PB_PASSWORD:
         from_secret: PB_PASSWORD
-      RAVEN_MIGRATION_CERT:
-        from_secret: RAVENDB_MIGRATIONS_CERT
-      RAVEN_MIGRATION_KEY:
-        from_secret: RAVENDB_MIGRATIONS_KEY
+      RAVEN_RUNTIME_CERT:
+        from_secret: RAVENDB_RUNTIME_CERT
+      RAVEN_RUNTIME_KEY:
+        from_secret: RAVENDB_RUNTIME_KEY
     commands:
       - export PATH=/home/eqr/.local/bin:/home/eqr/.asdf/shims:/home/eqr/.asdf/bin:/usr/local/bin:/usr/local/go/bin:$$PATH
       - set +x
@@ -40,8 +42,8 @@ steps:
       - trap 'rm -rf "$$SECRETS"' EXIT
       - printf '%s' "$${PB_IDENTITY:?PB_IDENTITY is required}" > "$$SECRETS/pb-identity"
       - printf '%s' "$${PB_PASSWORD:?PB_PASSWORD is required}" > "$$SECRETS/pb-password"
-      - printf '%s' "$${RAVEN_MIGRATION_CERT:?RAVEN_MIGRATION_CERT is required}" > "$$SECRETS/raven-cert.pem"
-      - printf '%s' "$${RAVEN_MIGRATION_KEY:?RAVEN_MIGRATION_KEY is required}" > "$$SECRETS/raven-key.pem"
+      - printf '%s' "$${RAVEN_RUNTIME_CERT:?RAVEN_RUNTIME_CERT is required}" > "$$SECRETS/raven-cert.pem"
+      - printf '%s' "$${RAVEN_RUNTIME_KEY:?RAVEN_RUNTIME_KEY is required}" > "$$SECRETS/raven-key.pem"
       - go build -o "$$SECRETS/kvmigrate" ./cmd/kvmigrate
       - for mode in dry-run import verify; do
         "$$SECRETS/kvmigrate"
