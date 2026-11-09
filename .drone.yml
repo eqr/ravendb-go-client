@@ -1,0 +1,58 @@
+---
+kind: pipeline
+type: exec
+name: kv-migrate
+
+# Manual only: start a custom build of master in Drone after stopping every app
+# that writes the KV collections. A rerun after cutover would overwrite RavenDB
+# with stale PocketBase data.
+trigger:
+  branch:
+    - master
+  event:
+    - custom
+
+steps:
+  - name: migrate
+    environment:
+      ASDF_DATA_DIR: /home/eqr/.asdf
+      GOPATH: /home/eqr/drone/go
+      GOMODCACHE: /home/eqr/drone/go/pkg.mod
+      GOCACHE: /home/eqr/drone/go/build
+      KV_COLLECTIONS: kv,mapper_db,library_kv
+      RAVEN_URLS: https://a.eqr-home.ravendb.community:8443
+      RAVEN_DATABASE: kv-shared
+      SOURCE_URL:
+        from_secret: PB_URL
+      PB_IDENTITY:
+        from_secret: PB_EMAIL
+      PB_PASSWORD:
+        from_secret: PB_PASSWORD
+      RAVEN_MIGRATION_CERT:
+        from_secret: RAVENDB_MIGRATIONS_CERT
+      RAVEN_MIGRATION_KEY:
+        from_secret: RAVENDB_MIGRATIONS_KEY
+    commands:
+      - export PATH=/home/eqr/.local/bin:/home/eqr/.asdf/shims:/home/eqr/.asdf/bin:/usr/local/bin:/usr/local/go/bin:$$PATH
+      - set +x
+      - umask 077
+      - SECRETS=$(mktemp -d)
+      - trap 'rm -rf "$$SECRETS"' EXIT
+      - printf '%s' "$${PB_IDENTITY:?PB_IDENTITY is required}" > "$$SECRETS/pb-identity"
+      - printf '%s' "$${PB_PASSWORD:?PB_PASSWORD is required}" > "$$SECRETS/pb-password"
+      - printf '%s' "$${RAVEN_MIGRATION_CERT:?RAVEN_MIGRATION_CERT is required}" > "$$SECRETS/raven-cert.pem"
+      - printf '%s' "$${RAVEN_MIGRATION_KEY:?RAVEN_MIGRATION_KEY is required}" > "$$SECRETS/raven-key.pem"
+      - go build -o "$$SECRETS/kvmigrate" ./cmd/kvmigrate
+      - for mode in dry-run import verify; do
+        "$$SECRETS/kvmigrate"
+        -mode "$$mode"
+        -source-url "$${SOURCE_URL:?SOURCE_URL is required}"
+        -source-identity-file "$$SECRETS/pb-identity"
+        -source-password-file "$$SECRETS/pb-password"
+        -collections "$$KV_COLLECTIONS"
+        -confirm-source-writers-stopped
+        -ravendb-urls "$$RAVEN_URLS"
+        -ravendb-database "$$RAVEN_DATABASE"
+        -ravendb-certificate-file "$$SECRETS/raven-cert.pem"
+        -ravendb-private-key-file "$$SECRETS/raven-key.pem" || exit 1;
+        done
