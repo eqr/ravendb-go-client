@@ -16,4 +16,6 @@ const (
 	CommandClientNotAttachment = "CLIENT_NOT_ATTACHMENT"
 	CompareExchangePut         = "COMPARE_EXCHANGE_PUT"
 	CompareExchangeDelete      = "COMPARE_EXCHANGE_DELETE"
+	CommandCounters            = "COUNTERS"
+	CommandTimeSeries          = "TIMESERIES"
 )

@@ -74,14 +74,16 @@ func isDelimToken(tok json.Token, delim string) bool {
 	return ok && delimTok.String() == delim
 }
 
-/* The response looks like:
-{
-  "Results": [
-    {
-       "foo": bar,
-    }
-  ]
-}
+/*
+	The response looks like:
+
+	{
+	  "Results": [
+	    {
+	       "foo": bar,
+	    }
+	  ]
+	}
 */
 func (o *StreamOperation) setResult(response *StreamResultResponse) (*yieldStreamResults, error) {
 	if response == nil {

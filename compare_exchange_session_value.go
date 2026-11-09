@@ -147,7 +147,6 @@ func (cesv *CompareExchangeSessionValue) GetValue(clazz reflect.Type, session *I
 		ncev := NewCompareExchangeValue(cesv.key, cesv.index, entityObject)
 		cesv.value = ncev
 		return ncev, nil
-		break
 	case exchangeValueStateMissing, compareExchangeValueStateDeleted:
 		return nil, nil
 	}
