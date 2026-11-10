@@ -23,7 +23,7 @@ steps:
       GOPATH: /home/eqr/drone/go
       GOMODCACHE: /home/eqr/drone/go/pkg.mod
       GOCACHE: /home/eqr/drone/go/build
-      KV_SCOPES: ""
+      KV_SCOPES: "kv:telegram"
       RAVEN_URLS: https://a.eqr-home.ravendb.community:8443
       RAVEN_DATABASE: kv-shared
       SOURCE_URL:
