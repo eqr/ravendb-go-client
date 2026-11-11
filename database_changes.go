@@ -178,6 +178,9 @@ type DatabaseChanges struct {
 	// will be notified if we connect or fail to connect
 	// allows waiting for connection being established
 	chIsConnected chan error
+	// The worker reconnects after a dropped websocket; the channel must be
+	// closed only on the first successful connect.
+	connectedOnce sync.Once
 
 	chCommands      chan *databaseChangesCommand
 	chWorkCompleted chan error
@@ -671,9 +674,7 @@ func (c *DatabaseChanges) doWorkInner(ctx context.Context) (error, bool) {
 
 	c.invokeConnectionStatusChanged()
 
-	c.chIsConnected <- nil
-	// close so that subsequent channel reads also return immediately
-	close(c.chIsConnected)
+	c.markConnected()
 
 	shouldReconnect := true
 	err = nil
@@ -700,6 +701,12 @@ func (c *DatabaseChanges) doWorkInner(ctx context.Context) (error, bool) {
 
 	c.invokeConnectionStatusChanged()
 	return err, shouldReconnect
+}
+
+// markConnected releases EnsureConnectedNow waiters; reads of the closed
+// channel return nil immediately afterwards.
+func (c *DatabaseChanges) markConnected() {
+	c.connectedOnce.Do(func() { close(c.chIsConnected) })
 }
 
 func (c *DatabaseChanges) doWork(ctx context.Context) error {
