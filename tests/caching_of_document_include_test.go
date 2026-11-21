@@ -294,6 +294,7 @@ func cofiCanAvoidUsingServerForMultiloadWithIncludeIfEverythingIsInSessionCache(
 
 func TestCachingOfDocumentInclude(t *testing.T) {
 	driver := createTestDriver(t)
+	driver.httpCacheSize = 128 * 1024 * 1024
 	destroy := func() { destroyDriver(t, driver) }
 	defer recoverTest(t, destroy)
 

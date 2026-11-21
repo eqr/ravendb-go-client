@@ -68,7 +68,6 @@ func NewDocumentConventions() *DocumentConventions {
 		RaiseIfQueryPageSizeIsNotSet:                   false,
 		transformClassCollectionNameToDocumentIDPrefix: getDefaultTransformCollectionNameToDocumentIdPrefix,
 		MaxNumberOfRequestsPerSession:                  32,
-		maxHttpCacheSize:                               128 * 1024 * 1024,
 		mu:                                             &sync.Mutex{},
 	}
 }
@@ -77,9 +76,10 @@ func (c *DocumentConventions) getMaxHttpCacheSize() int {
 	return c.maxHttpCacheSize
 }
 
-// SetMaxHttpCacheSize sets the HTTP response cache size in bytes. A size of 0
-// or less disables the cache. The cache does not evict entries, so a long-lived
-// store that reads many distinct documents should disable it.
+// SetMaxHttpCacheSize enables the HTTP response cache when size is positive.
+// The cache is off by default: it never evicts entries, so a long-lived store
+// that reads many distinct documents grows without bound. Aggressive caching
+// needs it enabled.
 func (c *DocumentConventions) SetMaxHttpCacheSize(size int) {
 	c.maxHttpCacheSize = size
 }

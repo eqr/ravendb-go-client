@@ -79,6 +79,8 @@ type RavenTestDriver struct {
 
 	customize func(*ravendb.DatabaseRecord)
 
+	httpCacheSize int
+
 	profData    bytes.Buffer
 	isProfiling bool
 }
@@ -404,6 +406,9 @@ func (d *RavenTestDriver) getDocumentStore2(dbName string, waitForIndexingTimeou
 	}
 	conventions := store.GetConventions()
 	conventions.ReadBalanceBehavior = pickRandomBalanceBehavior()
+	if d.httpCacheSize > 0 {
+		conventions.SetMaxHttpCacheSize(d.httpCacheSize)
+	}
 	store.SetConventions(conventions)
 
 	if d.isSecure {

@@ -35,3 +35,9 @@ func TestSetMaxHttpCacheSizeDisablesExecutorCache(t *testing.T) {
 		t.Fatalf("cache enabled with size 0")
 	}
 }
+
+func TestHttpCacheDisabledByDefault(t *testing.T) {
+	if !newHttpCache(NewDocumentConventions().getMaxHttpCacheSize()).disabled {
+		t.Fatalf("cache enabled with default conventions")
+	}
+}
