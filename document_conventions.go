@@ -77,6 +77,13 @@ func (c *DocumentConventions) getMaxHttpCacheSize() int {
 	return c.maxHttpCacheSize
 }
 
+// SetMaxHttpCacheSize sets the HTTP response cache size in bytes. A size of 0
+// or less disables the cache. The cache does not evict entries, so a long-lived
+// store that reads many distinct documents should disable it.
+func (c *DocumentConventions) SetMaxHttpCacheSize(size int) {
+	c.maxHttpCacheSize = size
+}
+
 func (c *DocumentConventions) Freeze() {
 	c.frozen = true
 }

@@ -52,6 +52,7 @@ func (c *genericCache) put(uri string, i *httpCacheItem) {
 type httpCache struct {
 	items      *genericCache
 	generation int32 // atomic
+	disabled   bool
 }
 
 func (c *httpCache) incGeneration() {
@@ -64,19 +65,17 @@ func (c *httpCache) getGeneration() int {
 }
 
 func newHttpCache(size int) *httpCache {
-	if size == 0 {
-		size = 1 * 1024 * 1024 // TODO: check what is default size of com.google.common.cache.Cache is
-	}
 	cache := &genericCache{
 		softValues:    true,
 		maximumWeight: size,
 		weighter: func(k string, v *httpCacheItem) int {
 			return len(v.payload) + 20
 		},
-		data: &sync.Map{ },
+		data: &sync.Map{},
 	}
 	return &httpCache{
-		items: cache,
+		items:    cache,
+		disabled: size <= 0,
 	}
 }
 
@@ -90,6 +89,9 @@ func (c *httpCache) close() {
 }
 
 func (c *httpCache) set(url string, changeVector *string, result []byte) {
+	if c.disabled {
+		return
+	}
 	httpCacheItem := newHttpCacheItem()
 	httpCacheItem.changeVector = changeVector
 	httpCacheItem.payload = result
@@ -100,6 +102,9 @@ func (c *httpCache) set(url string, changeVector *string, result []byte) {
 
 // returns cacheItem, changeVector and response
 func (c *httpCache) get(url string) (*releaseCacheItem, *string, []byte) {
+	if c.disabled {
+		return newReleaseCacheItem(nil), nil, nil
+	}
 	item := c.items.getIfPresent(url)
 	if item != nil {
 		//fmt.Printf("HttpCache.get(): found url: %s, changeVector: %s, len(payload): %d\n", url, *item.changeVector, len(item.payload))
@@ -111,6 +116,9 @@ func (c *httpCache) get(url string) (*releaseCacheItem, *string, []byte) {
 }
 
 func (c *httpCache) setNotFound(url string) {
+	if c.disabled {
+		return
+	}
 	//fmt.Printf("HttpCache.setNotFound(): url: %s\n", url)
 	httpCacheItem := newHttpCacheItem()
 	s := "404 response"
